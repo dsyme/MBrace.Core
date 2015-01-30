@@ -6,11 +6,13 @@ open System.Threading
 
 open Nessos.Thespian
 open Nessos.Thespian.Remote
+
 open MBrace
 open MBrace.Store
+open MBrace.Client
 open MBrace.Continuation
 open MBrace.Runtime
-open MBrace.Runtime.Vagrant
+open MBrace.Runtime.Vagabond
 open MBrace.Runtime.Compiler
 open MBrace.SampleRuntime.Tasks
 open MBrace.SampleRuntime.RuntimeProvider
@@ -20,15 +22,16 @@ open MBrace.SampleRuntime.RuntimeProvider
 /// BASE64 serialized argument parsing schema
 module internal Argument =
     let ofRuntime (runtime : RuntimeState) =
-        let pickle = VagrantRegistry.Pickler.Pickle(runtime)
+        let pickle = Config.getSerializer().Pickler.Pickle(runtime)
         System.Convert.ToBase64String pickle
 
     let toRuntime (args : string []) =
         let bytes = System.Convert.FromBase64String(args.[0])
-        VagrantRegistry.Pickler.UnPickle<RuntimeState> bytes
+        Config.getSerializer().Pickler.UnPickle<RuntimeState> bytes
 
 /// MBrace Sample runtime client instance.
-type MBraceRuntime private (logger : string -> unit) =
+type MBraceRuntime private () =
+    static let compiler = CloudCompiler.Init()
     static let mutable exe = None
     static let initWorkers (target : RuntimeState) (count : int) =
         if count < 1 then invalidArg "workerCount" "must be positive."
@@ -44,7 +47,10 @@ type MBraceRuntime private (logger : string -> unit) =
     let getWorkerRefs () =
         if procs.Length > 0 then procs |> Array.map (fun (p: Process) -> new Worker(p.Id.ToString()) :> IWorkerRef)
         else workerManagers |> Array.map (fun p -> new Worker(p) :> IWorkerRef)
-    let state = RuntimeState.InitLocal logger getWorkerRefs
+
+    let logEvent = new Event<string> ()
+    let state = RuntimeState.InitLocal logEvent.Trigger getWorkerRefs
+    let atomProvider = new ActorAtomProvider(state) :> ICloudAtomProvider
     let channelProvider = new ActorChannelProvider(state) :> ICloudChannelProvider
 
     let appendWorker (address: string) =
@@ -54,6 +60,20 @@ type MBraceRuntime private (logger : string -> unit) =
         workerManager <!= fun ch -> Actors.WorkerManager.SubscribeToRuntime(ch, state, 10)
         workerManager.Id.ToString()
 
+    let createProcessInfo () =
+        {
+            ProcessId = System.Guid.NewGuid().ToString()
+            DefaultDirectory = Config.getFileStore().GetRandomDirectoryName()
+            DefaultAtomContainer = atomProvider.CreateUniqueContainerName()
+            DefaultChannelContainer = channelProvider.CreateUniqueContainerName()
+        }
+        
+    let imem =
+        let fileConfig    = Config.getFileStoreConfiguration(Config.getFileStore().GetRandomDirectoryName())
+        let atomConfig    = CloudAtomConfiguration.Create(atomProvider, atomProvider.CreateUniqueContainerName())
+        let channelConfig = CloudChannelConfiguration.Create(channelProvider, channelProvider.CreateUniqueContainerName())
+        LocalRuntime.Create(fileConfig = fileConfig, atomConfig = atomConfig, channelConfig = channelConfig)
+
     /// <summary>
     ///     Asynchronously execute a workflow on the distributed runtime.
     /// </summary>
@@ -62,19 +82,13 @@ type MBraceRuntime private (logger : string -> unit) =
     /// <param name="faultPolicy">Fault policy. Defaults to infinite retries.</param>
     member __.RunAsync(workflow : Cloud<'T>, ?cancellationToken : CancellationToken, ?faultPolicy) = async {
         let faultPolicy = match faultPolicy with Some fp -> fp | None -> FaultPolicy.InfiniteRetry()
-        let computation = CloudCompiler.Compile workflow
-        let processInfo =
-            {
-                ProcessId = System.Guid.NewGuid().ToString()
-                DefaultDirectory = Config.getFileStore().CreateUniqueDirectoryPath()
-                DefaultAtomContainer = Config.getAtomProvider().CreateUniqueContainerName()
-                DefaultChannelContainer = channelProvider.CreateUniqueContainerName()
-            }
+        let computation = compiler.Compile workflow
+        let processInfo = createProcessInfo ()
 
         let! cts = state.ResourceFactory.RequestCancellationTokenSource()
         try
             cancellationToken |> Option.iter (fun ct -> ct.Register(fun () -> cts.Cancel()) |> ignore)
-            let! resultCell = state.StartAsCell processInfo computation.Dependencies cts faultPolicy computation.Workflow
+            let! resultCell = state.StartAsCell processInfo computation.Dependencies cts faultPolicy None computation.Workflow
             let! result = resultCell.AwaitResult()
             return result.Value
         finally
@@ -100,6 +114,32 @@ type MBraceRuntime private (logger : string -> unit) =
     member __.Run(workflow : Cloud<'T>, ?cancellationToken : CancellationToken, ?faultPolicy) =
         __.RunAsync(workflow, ?cancellationToken = cancellationToken, ?faultPolicy = faultPolicy) |> Async.RunSync
 
+    /// <summary>
+    ///     Run workflow as local, in-memory computation
+    /// </summary>
+    /// <param name="workflow">Workflow to execute</param>
+    member __.RunLocalAsync(workflow : Cloud<'T>) : Async<'T> =
+        let procInfo = createProcessInfo ()
+        let runtimeP = RuntimeProvider.RuntimeProvider.CreateInMemoryRuntime(state, procInfo)
+        let resources = resource {
+            yield Config.getFileStoreConfiguration procInfo.DefaultDirectory
+            yield atomProvider
+            yield channelProvider
+            yield runtimeP :> ICloudRuntimeProvider
+        }
+
+        Cloud.ToAsync(workflow, resources = resources)
+
+    /// Returns the store client for provided runtime
+    member __.StoreClient = imem.StoreClient
+
+    /// <summary>
+    ///     Run workflow as local, in-memory computation
+    /// </summary>
+    /// <param name="workflow">Workflow to execute</param>
+    /// <param name="cancellationToken">Cancellation token</param>
+    member __.RunLocal(workflow, ?cancellationToken) : 'T = imem.Run(workflow, ?cancellationToken = cancellationToken)
+
     /// Violently kills all worker nodes in the runtime
     member __.KillAllWorkers () = lock procs (fun () -> for p in procs do try p.Kill() with _ -> () ; procs <- [||])
     /// Gets all worker processes in the runtime
@@ -112,16 +152,16 @@ type MBraceRuntime private (logger : string -> unit) =
     member __.AppendWorkers (addresses: string[]) =
         lock workerManagers (fun () -> workerManagers <- addresses |> Array.map appendWorker)
 
-    static member Init(workers: string[], ?logger: string -> unit) =
-        let logger = defaultArg logger ignore
-        let client = new MBraceRuntime(logger)
+    member __.Logs = logEvent.Publish
+
+    static member Init(workers: string[]) =
+        let client = new MBraceRuntime()
         client.AppendWorkers workers
         client
 
     /// Initialize a new local rutime instance with supplied worker count.
-    static member InitLocal(workerCount : int, ?logger : string -> unit) =
-        let logger = defaultArg logger ignore
-        let client = new MBraceRuntime(logger)
+    static member InitLocal(workerCount : int) =
+        let client = new MBraceRuntime()
         client.AppendWorkers(workerCount)
         client
 

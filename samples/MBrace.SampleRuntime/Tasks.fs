@@ -1,4 +1,4 @@
-﻿module internal MBrace.SampleRuntime.Tasks
+﻿﻿module internal MBrace.SampleRuntime.Tasks
 
 // Provides facility for the execution of tasks.
 // In this context, a task denotes a single work item to be sent
@@ -12,7 +12,7 @@ open System.Threading.Tasks
 
 open Nessos.Thespian
 open Nessos.FsPickler
-open Nessos.Vagrant
+open Nessos.Vagabond
 
 open MBrace
 open MBrace.Continuation
@@ -20,7 +20,7 @@ open MBrace.Store
 open MBrace.Runtime
 open MBrace.Runtime.Store
 open MBrace.Runtime.Serialization
-open MBrace.Runtime.Vagrant
+open MBrace.Runtime.Vagabond
 open MBrace.SampleRuntime.Actors
 
 // Tasks are cloud workflows that have been attached to continuations.
@@ -49,7 +49,7 @@ type TaskExecutionMonitor () =
     /// triggering the contextual TaskExecutionMonitor on uncaught exception
     static member ProtectAsync ctx (f : Async<unit>) : unit =
         let tem = fromContext ctx
-        Async.StartWithContinuations(f, ignore, tem.TriggerFault, ignore)   
+        Async.StartWithContinuations(f, ignore, tem.TriggerFault, ignore)
 
     /// Triggers task completion on the contextual TaskExecutionMonitor
     static member TriggerCompletion ctx =
@@ -81,7 +81,7 @@ type ProcessInfo =
     }
 
 /// Defines a task to be executed in a worker node
-type Task = 
+type Task =
     {
         /// Return type of the defining cloud workflow.
         Type : Type
@@ -105,31 +105,33 @@ with
     /// <param name="runtimeProvider">Local scheduler implementation.</param>
     /// <param name="dependencies">Task dependent assemblies.</param>
     /// <param name="task">Task to be executed.</param>
-    static member RunAsync (runtimeProvider : IRuntimeProvider) 
-                            (channelProvider : ICloudChannelProvider) 
+    static member RunAsync (runtimeProvider : ICloudRuntimeProvider)
+                            (atomProvider : ICloudAtomProvider)
+                            (channelProvider : ICloudChannelProvider)
                             (dependencies : AssemblyId list) (faultCount : int)
-                            (task : Task) = 
+                            (task : Task) =
         async {
             let tem = new TaskExecutionMonitor()
             let ctx =
                 {
-                    Resources = 
-                        resource { 
-                            yield runtimeProvider ; yield tem ; yield task.CancellationTokenSource ; 
-                            yield! Config.getStoreConfiguration task.ProcessInfo.DefaultDirectory task.ProcessInfo.DefaultAtomContainer ;
-                            yield { ChannelProvider = channelProvider ; DefaultContainer = task.ProcessInfo.DefaultChannelContainer }
-                            yield channelProvider ; yield dependencies 
+                    Resources =
+                        resource {
+                            yield runtimeProvider ; yield tem ; yield task.CancellationTokenSource ;
+                            yield Config.getFileStoreConfiguration task.ProcessInfo.DefaultDirectory ;
+                            yield { AtomProvider = atomProvider ; DefaultContainer = task.ProcessInfo.DefaultAtomContainer } ;
+                            yield { ChannelProvider = channelProvider ; DefaultContainer = task.ProcessInfo.DefaultChannelContainer } ;
+                            yield channelProvider ; yield dependencies
                         }
 
                     CancellationToken = task.CancellationTokenSource.GetLocalCancellationToken()
                 }
 
             if faultCount > 0 then
-                // current task has already faulted once, 
+                // current task has already faulted once,
                 // consult user-provided fault policy for deciding how to proceed.
                 let faultException = new FaultException(sprintf "Fault exception when running task '%s'." task.TaskId)
                 match task.FaultPolicy.Policy faultCount (faultException :> exn) with
-                | None -> 
+                | None ->
                     // fault policy decrees exception, pass fault to exception continuation
                     task.Econt ctx <| ExceptionDispatchInfo.Capture faultException
                 | Some timeout ->
@@ -143,39 +145,44 @@ with
             return! TaskExecutionMonitor.AwaitCompletion tem
         }
 
-// type private SchedullerMsg =
-//     | ScheduleTask of task: Task * dependencies: AssemblyId list * faultCount: int * leaseMonitor: LeaseMonitor
 
-// type private SchedullerState =
-//     {
-//         TaskQueue: PartIndexedQueue<string (* IWorkerRef.Id *), Pickle<Task> * AssemblyId list>
-//     }
+/// Type of pickled task as represented in the task queue
+type PickledTask =
+    {
+        Task : Pickle<Task>
+        Dependencies : AssemblyId list
+        Target : IWorkerRef option
+    }
+with
+    /// <summary>
+    ///     Create a pickled task out of given cloud workflow and continuations
+    /// </summary>
+    /// <param name="dependencies">Vagabond dependency manifest.</param>
+    /// <param name="cts">Distributed cancellation token source.</param>
+    /// <param name="sc">Success continuation</param>
+    /// <param name="ec">Exception continuation</param>
+    /// <param name="cc">Cancellation continuation</param>
+    /// <param name="wf">Workflow</param>
+    static member CreateTask procInfo dependencies cts fp sc ec cc worker (wf : Cloud<'T>) : PickledTask =
+        let taskId = System.Guid.NewGuid().ToString()
+        let startTask ctx =
+            let cont = { Success = sc ; Exception = ec ; Cancellation = cc }
+            Cloud.StartWithContinuations(wf, cont, ctx)
 
-// type internal Scheduler private (source: ActorRef<SchedullerMsg>) =
-//     static let behavior (state: SchedullerState) (msg: SchedullerMsg) =
-//         async {
-//             match msg with
-//             | ScheduleTask(task, dependencies, faultCount, leaseMonitor) ->
-//                 if state.WorkerQueue.Count = 0 then 
-//                     return { state with UnschedulledTasks = (task, dependencies, faultCount, leaseMonitor)::state.UnschedulledTasks }
-//                 else
-//                     do! scheduleTask task dependencies faultCount leaseMonitor
-//                     return state
-//         }
+        let task =
+            {
+                Type = typeof<'T>
+                ProcessInfo = procInfo
+                TaskId = taskId
+                StartTask = startTask
+                FaultPolicy = fp
+                Econt = ec
+                CancellationTokenSource = cts
+            }
 
-//     static member Init(initWorkers: WorkerRef list) =
-//         let initState = { WorkerQueue = new Queue<WorkerRef>(initWorkers); UnschedulledTasks = [] }
-//         let source =
-//             Actor.Stateful initState behavior
-//             |> Actor.Publish
-//             |> Actor.ref
+        let taskp = Config.getSerializer().Pickler.PickleTyped task
 
-//         new Scheduler(source)
-
-//     member __.ScheduleTask(task: Task, dependencies: AssemblyId list, faultCount: int, leaseMonitor: LeaseMonitor) =
-//         source <-!- ScheduleTask(task, dependencies, faultCount, leaseMonitor)
-
-
+        { Task = taskp ; Dependencies = dependencies ; Target = worker }
 
 /// Defines a handle to the state of a runtime instance
 /// All information pertaining to the runtime execution state
@@ -202,6 +209,18 @@ type RuntimeState =
 with
     /// Initialize a new runtime state in the local process
     static member InitLocal (logger : string -> unit) (getWorkers : unit -> IWorkerRef []) =
+        // // task dequeue predicate -- checks if task is assigned to particular target
+        // let shouldDequeue (dequeueingWorker : IWorkerRef) (pt : PickledTask) =
+        //     match pt.Target with
+        //     // task not applicable to specific worker, approve dequeue
+        //     | None -> true
+        //     | Some w ->
+        //         // task applicable to current worker, approve dequeue
+        //         if w = dequeueingWorker then true
+        //         else
+        //             // worker not applicable to current worker, dequeue if target worker has been disposed
+        //             getWorkers () |> Array.forall ((<>) dequeueingWorker)
+
         {
             IPEndPoint = MBrace.SampleRuntime.Config.getLocalEndpoint()
             Workers = ImmutableCell.Init getWorkers
@@ -213,22 +232,19 @@ with
         }
 
     /// <summary>
-    ///     Enqueue a cloud workflow with supplied continuations to the runtime task queue.
+    ///     Create a pickled task out of given cloud workflow and continuations
     /// </summary>
-    /// <param name="dependencies">Vagrant dependency manifest.</param>
+    /// <param name="dependencies">Vagabond dependency manifest.</param>
     /// <param name="cts">Distributed cancellation token source.</param>
     /// <param name="sc">Success continuation</param>
     /// <param name="ec">Exception continuation</param>
     /// <param name="cc">Cancellation continuation</param>
     /// <param name="wf">Workflow</param>
-    member rt.EnqueueTask procInfo dependencies cts fp sc ec cc (wf : Cloud<'T>) =
-        let taskId = System.Guid.NewGuid().ToString()
-        let startTask ctx =
-            let cont = { Success = sc ; Exception = ec ; Cancellation = cc }
-            Cloud.StartWithContinuations(wf, cont, ctx)
+    member rt.EnqueueTask procInfo dependencies cts fp sc ec cc worker (wf : Cloud<'T>) : unit =
+        rt.TaskQueue.Enqueue <| PickledTask.CreateTask procInfo dependencies cts fp sc ec cc worker wf
 
-        let task = 
-            { 
+        let task =
+            {
                 Type = typeof<'T>
                 ProcessInfo = procInfo
                 TaskId = taskId
@@ -266,9 +282,9 @@ with
     /// <param name="dependencies">Declared workflow dependencies.</param>
     /// <param name="cts">Cancellation token source bound to task.</param>
     /// <param name="wf">Input workflow.</param>
-    member rt.StartAsCell procInfo dependencies cts fp (wf : Cloud<'T>) = async {
+    member rt.StartAsCell procInfo dependencies cts fp worker (wf : Cloud<'T>) = async {
         let! resultCell = rt.ResourceFactory.RequestResultCell<'T>()
-        let setResult ctx r = 
+        let setResult ctx r =
             async {
                 let! success = resultCell.SetResult r
                 TaskExecutionMonitor.TriggerCompletion ctx
@@ -277,7 +293,7 @@ with
         let scont ctx t = setResult ctx (Completed t)
         let econt ctx e = setResult ctx (Exception e)
         let ccont ctx c = setResult ctx (Cancelled c)
-        rt.EnqueueTask procInfo dependencies cts fp scont econt ccont wf
+        rt.EnqueueTask procInfo dependencies cts fp scont econt ccont worker wf
         return resultCell
     }
 
@@ -286,7 +302,7 @@ with
         let! item = rt.TaskQueue.TryUnindexedDequeue()
         match item with
         | None -> return None
-        | Some ((tp, deps), faultCount, leaseMonitor) -> 
+        | Some ((tp, deps), faultCount, leaseMonitor) ->
             do! rt.AssemblyExporter.LoadDependencies deps
             let task = VagrantRegistry.Pickler.UnPickleTyped tp
             return Some (task, deps, faultCount, leaseMonitor)
@@ -297,7 +313,7 @@ with
         let! item = rt.TaskQueue.TryDequeue(workerId)
         match item with
         | None -> return None
-        | Some ((tp, deps), faultCount, leaseMonitor) -> 
+        | Some ((tp, deps), faultCount, leaseMonitor) ->
             do! rt.AssemblyExporter.LoadDependencies deps
             let task = VagrantRegistry.Pickler.UnPickleTyped tp
             return Some (task, deps, faultCount, leaseMonitor)

@@ -1,4 +1,4 @@
-﻿namespace MBrace.SampleRuntime.Actors
+﻿﻿namespace MBrace.SampleRuntime.Actors
 
 //
 //  Implements a collection of distributed resources that provide
@@ -14,12 +14,12 @@ open System.Threading
 open Nessos.Thespian
 open Nessos.Thespian.Remote.Protocols
 
-open Nessos.Vagrant
+open Nessos.Vagabond
 
 open MBrace
 open MBrace.Continuation
 open MBrace.Runtime
-open MBrace.Runtime.Vagrant
+open MBrace.Runtime.Vagabond
 open MBrace.SampleRuntime
 
 /// Actor publication utilities
@@ -35,11 +35,11 @@ type Actor private () =
         |> Actor.start
 
     /// Exception-safe stateful actor behavior combinator
-    static member Stateful (init : 'State) f = 
+    static member Stateful (init : 'State) f =
         let rec aux state (self : Actor<'T>) = async {
             let! msg = self.Receive()
-            let! state' = async { 
-                try return! f state msg 
+            let! state' = async {
+                try return! f state msg
                 with e -> printfn "Actor fault (%O): %O" typeof<'T> e ; return state
             }
 
@@ -86,7 +86,7 @@ type Latch private (source : ActorRef<LatchMessage>) =
         new Latch(ref)
 
 //
-//  Distributed readable cell
+//  Distributed read-only cell
 //
 
 type ImmutableCell<'T> private (source : ActorRef<IReplyChannel<'T>>) =
@@ -106,7 +106,7 @@ type ImmutableCell<'T> private (source : ActorRef<IReplyChannel<'T>>) =
 
 type private CellMsg<'T> =
     | Override of 'T
-    | Set of IReplyChannel<bool> * 'T 
+    | Set of IReplyChannel<bool> * 'T
     | TryRead of IReplyChannel<'T option>
 
 type Cell<'T> private (source: ActorRef<CellMsg<'T>>) =
@@ -189,7 +189,7 @@ type StoreCacheMap private (source: ActorRef<StoreCacheMapMsg>) =
             |> Actor.ref
 
         new StoreCacheMap(source)
-        
+
 
 //
 //  Distributed logger
@@ -287,7 +287,7 @@ type ResultCell<'T> private (source : ActorRef<ResultCellMsg<'T>>) =
     member c.AwaitResult() = async {
         let! result = source <!- TryGetResult
         match result with
-        | None -> 
+        | None ->
             do! Async.Sleep 500
             return! c.AwaitResult()
         | Some r -> return r
@@ -297,7 +297,7 @@ type ResultCell<'T> private (source : ActorRef<ResultCellMsg<'T>>) =
     static member Init() : ResultCell<'T> =
         let behavior state msg = async {
             match msg with
-            | SetResult (_, rc) when Option.isSome state -> 
+            | SetResult (_, rc) when Option.isSome state ->
                 do! rc.Reply false
                 return state
             | SetResult (result, rc) ->
@@ -387,7 +387,7 @@ and DistributedCancellationTokenSource private (source : ActorRef<CancellationTo
         dcts
 
 //
-//  Distributed lease monitor. Tracks progress of dequeued tasks by 
+//  Distributed lease monitor. Tracks progress of dequeued tasks by
 //  requiring heartbeats from the worker node. Triggers a fault event
 //  when heartbeat threshold is exceeded. Used for the sample fault-tolerance implementation.
 //
@@ -422,7 +422,7 @@ type LeaseMonitor private (threshold : TimeSpan, source : ActorRef<LeaseMonitorM
         Async.Start(heartbeat(), cts.Token)
         return { new IDisposable with member __.Dispose () = cts.Cancel () }
     }
-    
+
     /// <summary>
     ///     Initializes a new lease monitor.
     /// </summary>
@@ -448,11 +448,11 @@ type LeaseMonitor private (threshold : TimeSpan, source : ActorRef<LeaseMonitorM
         let rec poll () = async {
             let! state = actor.Ref <!- GetLeaseState
             match state with
-            | Acquired -> 
+            | Acquired ->
                 do! Async.Sleep(2 * int threshold.TotalMilliseconds)
                 return! poll ()
             | Released -> try actor.Stop() with _ -> ()
-            | Faulted -> try faultEvent.Trigger () ; actor.Stop() with _ -> () 
+            | Faulted -> try faultEvent.Trigger () ; actor.Stop() with _ -> ()
         }
 
         Async.Start(poll ())
@@ -464,44 +464,48 @@ type LeaseMonitor private (threshold : TimeSpan, source : ActorRef<LeaseMonitorM
 //  Distributed, fault-tolerant queue implementation
 //
 
-type private QueueMsg<'T> =
+type private QueueMsg<'T, 'DequeueToken> =
     | EnQueue of 'T * (* fault count *) int
-    | TryDequeue of IReplyChannel<('T * (* fault count *) int * LeaseMonitor) option>
+    | EnQueueMultiple of 'T []
+    | TryDequeue of 'DequeueToken * IReplyChannel<('T * (* fault count *) int * LeaseMonitor) option>
 
 type private ImmutableQueue<'T> private (front : 'T list, back : 'T list) =
     static member Empty = new ImmutableQueue<'T>([],[])
     static member Singleton t = ImmutableQueue.Empty.Enqueue t
     member __.Enqueue t = new ImmutableQueue<'T>(front, t :: back)
-    member __.TryDequeue () = 
+    member __.EnqueueMultiple ts = new ImmutableQueue<'T>(front, List.rev ts @ back)
+    member __.TryDequeue () =
         match front with
         | hd :: tl -> Some(hd, new ImmutableQueue<'T>(tl, back))
-        | [] -> 
+        | [] ->
             match List.rev back with
             | [] -> None
             | hd :: tl -> Some(hd, new ImmutableQueue<'T>(tl, []))
 
 /// Provides a distributed, fault-tolerant queue implementation
-type DistributedQueue<'T> private (source : ActorRef<QueueMsg<'T>>) =
+type DistributedQueue<'T, 'DequeueToken'> private (source : ActorRef<QueueMsg<'T, 'DequeueToken'>>) =
     member __.Enqueue (t : 'T) = source <-- EnQueue (t, 0)
-    member __.TryDequeue () = source <!- TryDequeue
+    member __.EnqueueMultiple (ts : 'T []) = source <-- EnQueueMultiple ts
+    member __.TryDequeue (token) = source <!- fun ch -> TryDequeue(token, ch)
 
     /// Initializes a new distribued queue instance.
-    static member Init() =
-        let self = ref Unchecked.defaultof<ActorRef<QueueMsg<'T>>>
+    static member Init(shouldDequeue : 'DequeueToken -> 'T -> bool) =
+        let self = ref Unchecked.defaultof<ActorRef<QueueMsg<'T, 'DequeueToken>>>
         let behaviour (queue : ImmutableQueue<'T * int>) msg = async {
             match msg with
             | EnQueue (t, faultCount) -> return queue.Enqueue (t, faultCount)
-            | TryDequeue rc ->
+            | EnQueueMultiple ts -> return ts |> Seq.map (fun t -> (t,0)) |> Seq.toList |> queue.EnqueueMultiple
+            | TryDequeue (dt, rc) ->
                 match queue.TryDequeue() with
-                | None ->
-                    do! rc.Reply None
-                    return queue
-
-                | Some((t, faultCount), queue') ->
+                | Some((t, faultCount), queue') when (try shouldDequeue dt t with _ -> false) ->
                     let putBack, leaseMonitor = LeaseMonitor.Init (TimeSpan.FromSeconds 5.)
                     do! rc.Reply (Some (t, faultCount, leaseMonitor))
                     let _ = putBack.Subscribe(fun () -> self.Value <-- EnQueue (t, faultCount + 1))
                     return queue'
+
+                | _ ->
+                    do! rc.Reply None
+                    return queue
         }
 
         self :=
@@ -517,7 +521,7 @@ type private PartIndexedQueueMsg<'K, 'T> =
     | TryIndexedDequeue of IReplyChannel<('T * (* fault count *) int * LeaseMonitor) option> * 'K
     | TryUnindexedDequeue of IReplyChannel<('T * (* fault count *) int * LeaseMonitor) option>
 
-type PartIndexedQueue<'K, 'T when 'K : comparison> private (source : ActorRef<PartIndexedQueueMsg<'K, 'T>>) =    
+type PartIndexedQueue<'K, 'T when 'K : comparison> private (source : ActorRef<PartIndexedQueueMsg<'K, 'T>>) =
     member __.Enqueue(key: 'K, t: 'T) = source <-- IndexedEnqueue(key, t, 0)
     member __.UnindexedEnqueue(t: 'T) = source <-- UnindexedEnqueue(t, 0)
     member __.TryDequeue(key: 'K) = source <!- fun ch -> TryIndexedDequeue(ch, key)
@@ -533,7 +537,7 @@ type PartIndexedQueue<'K, 'T when 'K : comparison> private (source : ActorRef<Pa
                     match Map.tryFind k queueIndex with
                     | Some queue -> return queueIndex |> Map.add k (queue.Enqueue(t, faultCount)), unindexedQueue
                     | None -> return queueIndex |> Map.add k (ImmutableQueue.Singleton(t, faultCount)), unindexedQueue
-                
+
                 | TryIndexedDequeue(rc, k) ->
                     match Map.tryFind k queueIndex with
                     | Some queue ->
@@ -545,7 +549,7 @@ type PartIndexedQueue<'K, 'T when 'K : comparison> private (source : ActorRef<Pa
                             let _ = putBack.Subscribe(fun () -> self.Value <-- UnindexedEnqueue (t, faultCount + 1))
                             return queueIndex |> Map.add k queue', unindexedQueue
                     | None -> return! behaviour (queueIndex, unindexedQueue) (TryUnindexedDequeue rc)
-                
+
                 | TryUnindexedDequeue ch ->
                     match unindexedQueue.TryDequeue() with
                     | None ->
@@ -566,24 +570,110 @@ type PartIndexedQueue<'K, 'T when 'K : comparison> private (source : ActorRef<Pa
         new PartIndexedQueue<'K, 'T>(self.Value)
 
 //
-//  Defines a distributed channel implementation
+//  Distributed atom implementation
+//
+
+type private tag = uint64
+
+type private AtomMsg<'T> =
+    | GetValue of IReplyChannel<tag * 'T>
+    | TrySetValue of tag * 'T * IReplyChannel<bool>
+    | ForceValue of 'T * IReplyChannel<unit>
+    | Dispose of IReplyChannel<unit>
+
+type Atom<'T> private (id : string, source : ActorRef<AtomMsg<'T>>) =
+
+    interface ICloudAtom<'T> with
+        member __.Id = id
+        member __.Value = Cloud.OfAsync <| async {
+            let! _,value = source <!- GetValue
+            return value
+        }
+
+        member __.Dispose() = Cloud.OfAsync <| async { return! source <!- Dispose }
+
+        member __.Force(value : 'T) = Cloud.OfAsync <| async { return! source <!- fun ch -> ForceValue(value, ch) }
+        member __.Update(f : 'T -> 'T, ?maxRetries) = Cloud.OfAsync <| async {
+            if maxRetries |> Option.exists (fun i -> i < 0) then
+                invalidArg "maxRetries" "must be non-negative."
+
+            let rec tryUpdate retries = async {
+                let! tag, value = source <!- GetValue
+                let value' = f value
+                let! success = source <!- fun ch -> TrySetValue(tag, value', ch)
+                if success then return ()
+                else
+                    match maxRetries with
+                    | None -> return! tryUpdate None
+                    | Some 0 -> return raise <| new OperationCanceledException("ran out of retries.")
+                    | Some i -> return! tryUpdate (Some (i-1))
+            }
+
+            return! tryUpdate maxRetries
+        }
+
+    static member Init(id : string, init : 'T) =
+        let behaviour (state : (uint64 * 'T) option) (msg : AtomMsg<'T>) = async {
+            match state with
+            | None -> // object disposed
+                let e = new System.ObjectDisposedException("ActorAtom")
+                match msg with
+                | GetValue rc -> do! rc.ReplyWithException e
+                | TrySetValue(_,_,rc) -> do! rc.ReplyWithException e
+                | ForceValue(_,rc) -> do! rc.ReplyWithException e
+                | Dispose rc -> do! rc.ReplyWithException e
+                return state
+
+            | Some ((tag, value) as s) ->
+                match msg with
+                | GetValue rc ->
+                    do! rc.Reply s
+                    return state
+                | TrySetValue(tag', value', rc) ->
+                    if tag' = tag then
+                        do! rc.Reply true
+                        return Some (tag + 1uL, value')
+                    else
+                        do! rc.Reply false
+                        return state
+                | ForceValue(value', rc) ->
+                    do! rc.Reply ()
+                    return Some (tag + 1uL, value')
+                | Dispose rc ->
+                    do! rc.Reply ()
+                    return None
+        }
+
+        let ref =
+            Actor.Stateful (Some (0uL, init)) behaviour
+            |> Actor.Publish
+            |> Actor.ref
+
+        new Atom<'T>(id, ref)
+
+
+
+//
+//  Distributed channel implementation
 //
 
 type private ChannelMsg<'T> =
     | Send of 'T
     | Receive of IReplyChannel<'T>
 
-type Channel<'T> private (source : ActorRef<ChannelMsg<'T>>) =
+type Channel<'T> private (id : string, source : ActorRef<ChannelMsg<'T>>) =
 
     interface IReceivePort<'T> with
-        member __.Receive(?timeout : int) = source.PostWithReply(Receive, ?timeout = timeout)
-        member __.Dispose () = async.Zero()
+        member __.Id = id
+        member __.Receive(?timeout : int) = Cloud.OfAsync <| async { return! source.PostWithReply(Receive, ?timeout = timeout) }
+        member __.Dispose () = cloud.Zero()
 
     interface ISendPort<'T> with
-        member __.Send(msg : 'T) = source.AsyncPost(Send msg)
+        member __.Id = id
+        member __.Send(msg : 'T) =  Cloud.OfAsync <| async { return! source.AsyncPost(Send msg) }
 
-    /// Initializes a new distribued queue instance.
-    static member Init() =
+    /// Initializes a new distributed queue instance.
+    static member Init(id : string) =
         let self = ref Unchecked.defaultof<ActorRef<ChannelMsg<'T>>>
         let behaviour (messages : ImmutableQueue<'T>, receivers : ImmutableQueue<IReplyChannel<'T>>) msg = async {
             match msg with
@@ -591,7 +681,7 @@ type Channel<'T> private (source : ActorRef<ChannelMsg<'T>>) =
                 match receivers.TryDequeue () with
                 | Some(rc, receivers') ->
                     // receiving side may have timed out a long time ago, protect
-                    try 
+                    try
                         do! rc.Reply t
                         return (messages, receivers')
                     with e ->
@@ -616,7 +706,7 @@ type Channel<'T> private (source : ActorRef<ChannelMsg<'T>>) =
             |> Actor.Publish
             |> Actor.ref
 
-        new Channel<'T>(self.Value)
+        new Channel<'T>(id, self.Value)
 
 //
 //  Distributed Resource factory.
@@ -638,7 +728,8 @@ type ResourceFactory private (source : ActorRef<ResourceFactoryMsg>) =
     member __.RequestResultAggregator<'T>(count : int) = __.RequestResource(fun () -> ResultAggregator<'T>.Init(count))
     member __.RequestCancellationTokenSource(?parent) = __.RequestResource(fun () -> DistributedCancellationTokenSource.Init(?parent = parent))
     member __.RequestResultCell<'T>() = __.RequestResource(fun () -> ResultCell<'T>.Init())
-    member __.RequestChannel<'T>() = __.RequestResource(fun () -> Channel<'T>.Init())
+    member __.RequestChannel<'T>(id) = __.RequestResource(fun () -> Channel<'T>.Init(id))
+    member __.RequestAtom<'T>(id, init) = __.RequestResource(fun () -> Atom<'T>.Init(id, init))
 
     static member Init () =
         let behavior (RequestResource(ctor,rc)) = async {
@@ -656,21 +747,21 @@ type ResourceFactory private (source : ActorRef<ResourceFactoryMsg>) =
         new ResourceFactory(ref)
 
 //
-// Assembly exporter : provides assembly uploading facility for Vagrant
+// Assembly exporter : provides assembly uploading facility for Vagabond
 //
 
 type private AssemblyExporterMsg =
-    | RequestAssemblies of AssemblyId list * IReplyChannel<AssemblyPackage list> 
+    | RequestAssemblies of AssemblyId list * IReplyChannel<AssemblyPackage list>
 
-/// Provides assembly uploading facility for Vagrant.
+/// Provides assembly uploading facility for Vagabond.
 type AssemblyExporter private (exporter : ActorRef<AssemblyExporterMsg>) =
     static member Init() =
         let behaviour (RequestAssemblies(ids, ch)) = async {
-            let packages = VagrantRegistry.Vagrant.CreateAssemblyPackages(ids, includeAssemblyImage = true)
+            let packages = VagabondRegistry.Instance.CreateAssemblyPackages(ids, includeAssemblyImage = true)
             do! ch.Reply packages
         }
 
-        let ref = 
+        let ref =
             Actor.Stateless behaviour
             |> Actor.Publish
             |> Actor.ref
@@ -690,7 +781,7 @@ type AssemblyExporter private (exporter : ActorRef<AssemblyExporterMsg>) =
                     member __.PullAssemblies ids = exporter <!- fun ch -> RequestAssemblies(ids, ch)
             }
 
-        do! VagrantRegistry.Vagrant.ReceiveDependencies publisher
+        do! VagabondRegistry.Instance.ReceiveDependencies publisher
     }
 
     /// <summary>
@@ -698,7 +789,7 @@ type AssemblyExporter private (exporter : ActorRef<AssemblyExporterMsg>) =
     /// </summary>
     /// <param name="graph">Object graph to be analyzed</param>
     member __.ComputeDependencies (graph:'T) =
-        VagrantRegistry.Vagrant.ComputeObjectDependencies(graph, permitCompilation = true)
+        VagabondRegistry.Instance.ComputeObjectDependencies(graph, permitCompilation = true)
         |> List.map Utilities.ComputeAssemblyId
 
 

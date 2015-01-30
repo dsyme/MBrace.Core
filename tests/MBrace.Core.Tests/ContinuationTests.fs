@@ -4,12 +4,14 @@ open System
 open System.Threading
 
 open NUnit.Framework
-open FsUnit
 
 open MBrace
+open MBrace.Continuation
+open MBrace.Workflows
 
 #nowarn "444"
 
+/// Core tests for the continuation monad
 [<TestFixture>]
 [<Category("ContinuationTests")>]
 module ``Continuation Tests`` =
@@ -18,43 +20,48 @@ module ``Continuation Tests`` =
     //  Simple expression execution
     //
 
+    let run (wf : Cloud<'T>) = Choice.protect(fun () -> Cloud.RunSynchronously(wf))
+    let runCts (wf : CancellationTokenSource -> Cloud<'T>) =
+        let cts = new CancellationTokenSource()
+        Choice.protect(fun () -> Cloud.RunSynchronously(wf cts, cancellationToken = cts.Token))
+
     [<Test>]
     let ``return value`` () =
-        cloud { return 1 + 1 } |> Cloud.RunProtected |> Choice.shouldEqual 2
+        cloud { return 1 + 1 } |> run |> Choice.shouldEqual 2
 
     [<Test>]
     let ``return exception`` () =
-        cloud { return 1  / 0 } |> Cloud.RunProtected |> Choice.shouldFailwith<_, DivideByZeroException>
+        cloud { return 1  / 0 } |> run |> Choice.shouldFailwith<_, DivideByZeroException>
 
     [<Test>]
     let ``side effect`` () =
         let cell = ref 0
         let comp = cloud { incr cell } 
-        !cell |> should equal 0
-        comp |> Cloud.RunProtected |> Choice.shouldEqual ()
-        !cell |> should equal 1
+        !cell |> shouldEqual 0
+        comp |> run |> Choice.shouldEqual ()
+        !cell |> shouldEqual 1
 
     [<Test>]
     let ``uncaught exception`` () =
-        cloud { ignore (1 / 0) } |> Cloud.RunProtected |> Choice.shouldFailwith<_, DivideByZeroException>
+        cloud { ignore (1 / 0) } |> run |> Choice.shouldFailwith<_, DivideByZeroException>
 
     [<Test>]
     let ``let binding`` () =
-        cloud { let x = 1 + 1 in return x + x } |> Cloud.RunProtected |> Choice.shouldEqual 4
+        cloud { let x = 1 + 1 in return x + x } |> run |> Choice.shouldEqual 4
 
     [<Test>]
     let ``monadic binding`` () =
         cloud {
             let! x = cloud { return 1 + 1 }
             return x + x
-        } |> Cloud.RunProtected |> Choice.shouldEqual 4
+        } |> run |> Choice.shouldEqual 4
 
     [<Test>]
     let ``exception in nested binding`` () =
         cloud {
             let! x = cloud { return 1 / 0 }
             return x + x
-        }  |> Cloud.RunProtected |> Choice.shouldFailwith<_, DivideByZeroException>
+        }  |> run |> Choice.shouldFailwith<_, DivideByZeroException>
 
     [<Test>]
     let ``monadic binding with exception on continuation`` () =
@@ -62,7 +69,7 @@ module ``Continuation Tests`` =
             let! x = cloud { return 1 + 1 }
             do invalidOp "failure"
             return x + x
-        } |> Cloud.RunProtected |> Choice.shouldFailwith<_, InvalidOperationException>
+        } |> run |> Choice.shouldFailwith<_, InvalidOperationException>
 
 
     [<Test>]
@@ -72,26 +79,26 @@ module ``Continuation Tests`` =
             do! cloud { incr cell }
             do! cloud { incr cell }
             return !cell
-        } |> Cloud.RunProtected |> Choice.shouldEqual 2
+        } |> run |> Choice.shouldEqual 2
 
     [<Test>]
     let ``exception in nested binding 2`` () =
         cloud {
             let! x = Cloud.Raise (new IndexOutOfRangeException())
             return x + 1
-        } |> Cloud.RunProtected |> Choice.shouldFailwith<_, IndexOutOfRangeException>
+        } |> run |> Choice.shouldFailwith<_, IndexOutOfRangeException>
 
     [<Test>]
     let ``cancellation`` () =
         let cell = ref 0
         let result =
-            Cloud.RunProtected(fun cts ->
+            runCts(fun cts ->
                 cloud {
                     do cts.Cancel()
                     do! cloud { incr cell }
                 })
 
-        !cell |> should equal 0
+        !cell |> shouldEqual 0
         result |> Choice.shouldFailwith<_, OperationCanceledException>
 
     [<Test>]
@@ -101,7 +108,7 @@ module ``Continuation Tests`` =
                 do raise <| new IndexOutOfRangeException()
                 return None
             with :? IndexOutOfRangeException as e -> return (Some e)
-        } |> Cloud.RunProtected |> Choice.shouldMatch Option.isSome
+        } |> run |> Choice.shouldBe Option.isSome
 
     [<Test>]
     let ``try with unhandled exception`` () =
@@ -110,7 +117,7 @@ module ``Continuation Tests`` =
                 do raise <| new IndexOutOfRangeException()
                 return false
             with :? DivideByZeroException -> return true
-        } |> Cloud.RunProtected |> Choice.shouldFailwith<_, IndexOutOfRangeException>
+        } |> run |> Choice.shouldFailwith<_, IndexOutOfRangeException>
 
     [<Test>]
     let ``try with handler raising new exception`` () =
@@ -119,7 +126,7 @@ module ``Continuation Tests`` =
                 do raise <| new IndexOutOfRangeException()
                 return false
             with :? IndexOutOfRangeException -> return! Cloud.Raise(new DivideByZeroException())
-        } |> Cloud.RunProtected |> Choice.shouldFailwith<_, DivideByZeroException>
+        } |> run |> Choice.shouldFailwith<_, DivideByZeroException>
 
     [<Test>]
     let ``try finally on success`` () =
@@ -132,9 +139,9 @@ module ``Continuation Tests`` =
                 with :? IndexOutOfRangeException -> return true
             finally
                 incr cell
-        } |> Cloud.RunProtected |> Choice.shouldEqual true
+        } |> run |> Choice.shouldEqual true
 
-        !cell |> should equal 1
+        !cell |> shouldEqual 1
 
     [<Test>]
     let ``try finally on exception`` () =
@@ -147,9 +154,9 @@ module ``Continuation Tests`` =
                 with :? DivideByZeroException -> return true
             finally
                 incr cell
-        } |> Cloud.RunProtected |> Choice.shouldFailwith<_, IndexOutOfRangeException>
+        } |> run |> Choice.shouldFailwith<_, IndexOutOfRangeException>
 
-        !cell |> should equal 1
+        !cell |> shouldEqual 1
 
     [<Test>]
     let ``try finally on success with exception in finally`` () =
@@ -161,7 +168,7 @@ module ``Continuation Tests`` =
                 with :? IndexOutOfRangeException -> return true
             finally
                 raise <| new InvalidCastException()
-        } |> Cloud.RunProtected |> Choice.shouldFailwith<_, InvalidCastException>
+        } |> run |> Choice.shouldFailwith<_, InvalidCastException>
 
 
     [<Test>]
@@ -174,36 +181,68 @@ module ``Continuation Tests`` =
                 with :? DivideByZeroException -> return true
             finally
                 raise <| new InvalidCastException()
-        } |> Cloud.RunProtected |> Choice.shouldFailwith<_, InvalidCastException>
+        } |> run |> Choice.shouldFailwith<_, InvalidCastException>
 
     [<Test>]
-    let ``for loop`` () =
-        let cell = ref 0
-        let comp = cloud {
-            for i in 1 .. 100 do
-                do! cloud { cell := !cell + i }
-        }
-        !cell |> should equal 0
-        Cloud.RunProtected comp |> Choice.shouldEqual ()
-        !cell |> should equal 5050
+    let ``try finally monadic`` () =
+        let n = ref 10
+        let rec loop () : Cloud<unit> =
+            Cloud.TryFinally(
+                Cloud.Raise(new Exception()),
+                cloud { if !n > 0 then decr n ; return! loop () }
+            )
+
+        loop () |> run |> Choice.shouldFailwith<_, Exception>
+        !n |> shouldEqual 0
 
     [<Test>]
-    let ``for loop on empty inputs`` () =
-        let cell = ref 0
-        let comp = cloud {
-            for i in (incr cell ; []) do
-                do! cloud { cell := !cell + i }
-        }
-        !cell |> should equal 0
-        Cloud.RunProtected comp |> Choice.shouldEqual ()
-        !cell |> should equal 1
+    let ``for loop over array`` () =
+        Check.QuickThrowOnFail<int []>(fun (ints : int[]) ->
+            if ints = null then () else
+            let arr = new ResizeArray<int> ()
+            let comp = cloud {
+                for i in ints do
+                    do! cloud { arr.Add i }
+            }
+            arr.Count |> shouldEqual 0
+            run comp |> Choice.shouldEqual ()
+            arr.ToArray() |> shouldEqual ints)
+
+    [<Test>]
+    let ``for loop over list`` () =
+        Check.QuickThrowOnFail<int list>(fun (ints : int list) ->
+            let arr = new ResizeArray<int> ()
+            let comp = cloud {
+                for i in ints do
+                    do! cloud { arr.Add i }
+            }
+
+            arr.Count |> shouldEqual 0
+            run comp |> Choice.shouldEqual ()
+            arr.ToArray() |> shouldEqual (List.toArray ints))
+
+    [<Test>]
+    let ``for loop over sequence`` () =
+        Check.QuickThrowOnFail<int []>(fun (ints : int []) ->
+            if ints = null then () else
+            let dseq = dseq ints
+            let arr = new ResizeArray<int> ()
+            let comp = cloud {
+                for i in dseq do
+                    do! cloud { arr.Add i }
+            }
+
+            arr.Count |> shouldEqual 0
+            run comp |> Choice.shouldEqual ()
+            arr.ToArray() |> shouldEqual ints
+            dseq.IsDisposed |> shouldEqual true)
 
     [<Test>]
     let ``for loop on null inputs`` () =
         cloud {
             for i in Unchecked.defaultof<int list> do
                 do! cloud { return () }
-        } |> Cloud.RunProtected |> Choice.shouldFailwith<_, ArgumentNullException>
+        } |> run |> Choice.shouldFailwith<_, NullReferenceException>
 
     [<Test>]
     let ``for loop with exception`` () =
@@ -212,14 +251,14 @@ module ``Continuation Tests`` =
             for i in 1 .. 100 do
                 incr cell
                 if i = 55 then return invalidOp "failure"
-        } |> Cloud.RunProtected |> Choice.shouldFailwith<_, InvalidOperationException>
+        } |> run |> Choice.shouldFailwith<_, InvalidOperationException>
 
-        !cell |> should equal 55
+        !cell |> shouldEqual 55
 
     [<Test>]
     let ``for loop with cancellation`` () =
         let cell = ref 0
-        Cloud.RunProtected(fun cts ->
+        runCts(fun cts ->
             cloud {
                 for i in 1 .. 100 do
                     incr cell
@@ -227,7 +266,7 @@ module ``Continuation Tests`` =
                 
             }) |> Choice.shouldFailwith<_, OperationCanceledException>
 
-        !cell |> should equal 55
+        !cell |> shouldEqual 55
 
     [<Test>]
     let ``while loop`` () =
@@ -237,7 +276,7 @@ module ``Continuation Tests`` =
                 incr cell
 
             return !cell
-        } |> Cloud.RunProtected |> Choice.shouldEqual 100
+        } |> run |> Choice.shouldEqual 100
 
     [<Test>]
     let ``while loop with exception on predicate`` () =
@@ -245,8 +284,8 @@ module ``Continuation Tests`` =
         cloud {
             while (if !cell < 55 then true else invalidOp "failure") do
                 incr cell
-        } |> Cloud.RunProtected |> Choice.shouldFailwith<_, InvalidOperationException>
-        !cell |> should equal 55
+        } |> run |> Choice.shouldFailwith<_, InvalidOperationException>
+        !cell |> shouldEqual 55
 
     [<Test>]
     let ``while loop with exception on body`` () =
@@ -255,13 +294,13 @@ module ``Continuation Tests`` =
             while true do
                 incr cell
                 if !cell = 55 then invalidOp "failure"
-        } |> Cloud.RunProtected |> Choice.shouldFailwith<_, InvalidOperationException>
-        !cell |> should equal 55
+        } |> run |> Choice.shouldFailwith<_, InvalidOperationException>
+        !cell |> shouldEqual 55
 
     [<Test>]
     let ``while loop with cancellation`` () =
         let cell = ref 0
-        Cloud.RunProtected(fun cts ->
+        runCts(fun cts ->
             cloud {
                 while true do
                     incr cell
@@ -269,7 +308,7 @@ module ``Continuation Tests`` =
                 
             }) |> Choice.shouldFailwith<_, OperationCanceledException>
 
-        !cell |> should equal 55
+        !cell |> shouldEqual 55
 
     [<Test>]
     let ``use binding`` () =
@@ -280,7 +319,7 @@ module ``Continuation Tests`` =
             }
 
             return r1, d.IsDisposed
-        } |> Cloud.RunProtected |> Choice.shouldEqual (false, true)
+        } |> run |> Choice.shouldEqual (false, true)
 
     [<Test>]
     let ``use! binding`` () =
@@ -291,7 +330,7 @@ module ``Continuation Tests`` =
             }
 
             return r1, d.IsDisposed
-        } |> Cloud.RunProtected |> Choice.shouldEqual (false, true)
+        } |> run |> Choice.shouldEqual (false, true)
 
     [<Test>]
     let ``use binding with exception`` () =
@@ -304,7 +343,7 @@ module ``Continuation Tests`` =
 
             with _ -> return d.IsDisposed
 
-        } |> Cloud.RunProtected |> Choice.shouldEqual true
+        } |> run |> Choice.shouldEqual true
 
     [<Test>]
     let ``use! binding with exception`` () =
@@ -317,7 +356,7 @@ module ``Continuation Tests`` =
 
             with _ -> return d.IsDisposed
 
-        } |> Cloud.RunProtected |> Choice.shouldEqual true
+        } |> run |> Choice.shouldEqual true
 
 
     //
@@ -339,7 +378,7 @@ module ``Continuation Tests`` =
         }
 
         for i in 1 .. 10 do
-            Cloud.RunProtected (factC i) |> Choice.shouldEqual (fact i)
+            run (factC i) |> Choice.shouldEqual (fact i)
 
     [<Test>]
     let ``fibonacci`` () =
@@ -357,7 +396,7 @@ module ``Continuation Tests`` =
         }
 
         for i in 1 .. 10 do
-            Cloud.RunProtected (fibC i) |> Choice.shouldEqual (fib i)
+            run (fibC i) |> Choice.shouldEqual (fib i)
 
     [<Test>]
     let ``ackermann`` () =
@@ -379,7 +418,7 @@ module ``Continuation Tests`` =
             }
 
         for i in 0 .. 3 do
-            Cloud.RunProtected(ackermannC i i) |> Choice.shouldEqual (ackermann i i)
+            run(ackermannC i i) |> Choice.shouldEqual (ackermann i i)
 
 
     type N = Z | S of N
@@ -398,10 +437,10 @@ module ``Continuation Tests`` =
                 return S pd
         }
 
-        Cloud.RunProtected (int2Peano -1) |> Choice.shouldFailwith<_, ArgumentException>
+        run (int2Peano -1) |> Choice.shouldFailwith<_, ArgumentException>
 
         for i = 0 to 10 do
-            Cloud.RunProtected (cloud { let! p = int2Peano i in return p.Value }) |> Choice.shouldEqual i
+            run (cloud { let! p = int2Peano i in return p.Value }) |> Choice.shouldEqual i
 
 
     [<Test>]
@@ -413,7 +452,7 @@ module ``Continuation Tests`` =
                 return 1 + r
         }
 
-        Cloud.RunProtected(diveTo 100000) |> Choice.shouldEqual 100000
+        run(diveTo 100000) |> Choice.shouldEqual 100000
 
     [<Test>]
     let ``deep exception`` () =
@@ -424,7 +463,7 @@ module ``Continuation Tests`` =
                 return 1 + r
         }
 
-        Cloud.RunProtected(diveRaise 100000) |> Choice.shouldFailwith<_, InvalidOperationException>
+        run(diveRaise 100000) |> Choice.shouldFailwith<_, InvalidOperationException>
 
     [<Test>]
     let ``deep cancellation`` () =
@@ -435,13 +474,78 @@ module ``Continuation Tests`` =
                 return 1 + r
         }
 
-        Cloud.RunProtected(diveRaise 100000) |> Choice.shouldFailwith<_, OperationCanceledException>
+        runCts(diveRaise 100000) |> Choice.shouldFailwith<_, OperationCanceledException>
 
 
     [<Test>]
     let ``runtime resources`` () =
-        Cloud.RunProtected(Cloud.GetWorkerCount()) |> Choice.shouldFailwith<_, Continuation.ResourceNotFoundException>
+        run(Cloud.GetWorkerCount()) |> Choice.shouldFailwith<_, Continuation.ResourceNotFoundException>
 
     [<Test>]
     let ``storage resouces`` () =
-        Cloud.RunProtected(CloudRef.New 0) |> Choice.shouldFailwith<_, Continuation.ResourceNotFoundException>
+        run(CloudRef.New 0) |> Choice.shouldFailwith<_, Continuation.ResourceNotFoundException>
+
+
+    //
+    //  Sequential workflow tests
+    //
+
+    [<Test>]
+    let ``Sequential.map`` () =
+        Check.QuickThrowOnFail<int list>(fun (ints : int list) ->
+            let expected = ints |> List.map (fun i -> i + 1) |> List.toArray
+            ints 
+            |> dseq 
+            |> Sequential.map (fun i -> cloud { return i + 1 }) 
+            |> run
+            |> Choice.shouldEqual expected)
+
+    [<Test>]
+    let ``Sequential.filter`` () =
+        Check.QuickThrowOnFail<int list>(fun (ints : int list) ->
+            let expected = ints |> List.filter (fun i -> i % 5 = 0 || i % 7 = 0) |> List.toArray
+            ints 
+            |> dseq 
+            |> Sequential.filter (fun i -> cloud { return i % 5 = 0 || i % 7 = 0 }) 
+            |> run
+            |> Choice.shouldEqual expected)
+
+    [<Test>]
+    let ``Sequential.choose`` () =
+        Check.QuickThrowOnFail<int list>(fun (ints : int list) ->
+            let expected = ints |> List.choose (fun i -> if i % 5 = 0 then Some i else None) |> List.toArray
+            ints 
+            |> dseq 
+            |> Sequential.choose (fun i -> cloud { return if i % 5 = 0 then Some i else None }) 
+            |> run
+            |> Choice.shouldEqual expected)
+
+    [<Test>]
+    let ``Sequential.fold`` () =
+        Check.QuickThrowOnFail<int list>(fun (ints : int list) ->
+            let expected = ints |> List.fold (fun s i -> i + s) 0
+            ints 
+            |> dseq 
+            |> Sequential.fold (fun s i -> cloud { return s + i }) 0
+            |> run
+            |> Choice.shouldEqual expected)
+
+    [<Test>]
+    let ``Sequential.tryFind`` () =
+        Check.QuickThrowOnFail<int list>(fun (ints : int list) ->
+            let expected = ints |> List.tryFind (fun i -> i % 13 = 0 || i % 7 = 0)
+            ints 
+            |> dseq 
+            |> Sequential.tryFind (fun i -> cloud { return i % 13 = 0 || i % 7 = 0 })
+            |> run
+            |> Choice.shouldEqual expected)
+
+    [<Test>]
+    let ``Sequential.tryPick`` () =
+        Check.QuickThrowOnFail<int list>(fun (ints : int list) ->
+            let expected = ints |> List.tryPick (fun i -> if i % 13 = 0 || i % 7 = 0 then Some i else None)
+            ints 
+            |> dseq 
+            |> Sequential.tryPick (fun i -> cloud { return if i % 13 = 0 || i % 7 = 0 then Some i else None })
+            |> run
+            |> Choice.shouldEqual expected)

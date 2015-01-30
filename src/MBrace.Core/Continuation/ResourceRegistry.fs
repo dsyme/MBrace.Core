@@ -5,26 +5,29 @@ open System.Runtime.Serialization
 
 [<AutoOpen>]
 module private ResourceRegistryUtils =
-    let inline key<'T> = typeof<'T>.AssemblyQualifiedName
+
+    // ResourceRegistry indexes by Type.AssemblyQualifiedName which is expensive to obtain.
+    // Memoize for better resolution performance.
+    let dict = new System.Collections.Generic.Dictionary<Type, string>()
+    let inline key<'T> : string =
+        let t = typeof<'T>
+        let mutable k = null
+        if dict.TryGetValue(typeof<'T>, &k) then k
+        else
+            lock dict (fun () ->
+                let k = t.AssemblyQualifiedName
+                dict.Add(t, k)
+                k)
 
 /// Immutable dependency container used for pushing
 /// runtime resources to the continuation monad.
 [<Sealed ; AutoSerializable(false)>]
 type ResourceRegistry private (index : Map<string, obj>) =
 
-    /// Try Resolving resource of given type
-    member __.TryResolve<'TResource> () = index.TryFind key<'TResource> |> Option.map unbox<'TResource>
+    member private __.Index = index
 
-    /// Resolves resource of given type
-    member __.Resolve<'TResource> () =
-        match index.TryFind key<'TResource> with
-        | Some boxedResource -> unbox<'TResource> boxedResource
-        | None -> 
-            let msg = sprintf "Resource '%s' not installed in this context." typeof<'TResource>.Name
-            raise <| ResourceNotFoundException msg
-
-    /// Creates an empty resource container
-    static member Empty = new ResourceRegistry(Map.empty)
+    /// Gets all resources currently registered with factory.
+    member __.InstalledResources = index |> Map.toArray |> Array.map fst
 
     /// <summary>
     ///     Creates a new resource registry by appending provided resource.
@@ -34,15 +37,47 @@ type ResourceRegistry private (index : Map<string, obj>) =
     member __.Register<'TResource>(resource : 'TResource) = 
         new ResourceRegistry(Map.add key<'TResource> (box resource) index)
 
-    member private __.Index = index
-    member internal __.CombineWith(other : ResourceRegistry) = 
-        let mutable index = index
-        for kv in other.Index do
+    /// Try Resolving resource of given type
+    member __.TryResolve<'TResource> () = 
+        match index.TryFind key<'TResource> with
+        | Some boxedResource -> Some (unbox<'TResource> boxedResource)
+        | None -> None
+
+    /// Resolves resource of given type
+    member __.Resolve<'TResource> () =
+        match index.TryFind key<'TResource> with
+        | Some boxedResource -> unbox<'TResource> boxedResource
+        | None -> 
+            let msg = sprintf "Resource '%s' not installed in this context." typeof<'TResource>.Name
+            raise <| ResourceNotFoundException msg
+
+    /// Returns true iff registry instance contains resource of given type
+    member __.Contains<'TResource> () = index.ContainsKey key<'TResource>
+
+    /// Creates an empty resource container
+    static member Empty = new ResourceRegistry(Map.empty)
+
+    /// <summary>
+    ///     Combines two resource registries into one.
+    /// </summary>
+    /// <param name="resources1">First resource registry.</param>
+    /// <param name="resources2">Second resource registry.</param>
+    static member Combine(resources1 : ResourceRegistry, resources2 : ResourceRegistry) =
+        let mutable index = resources1.Index
+        for kv in resources2.Index do
             index <- Map.add kv.Key kv.Value index
         new ResourceRegistry(index)
 
-    /// Gets all resources currently registered with factory.
-    member __.InstalledResources = index |> Map.toArray |> Array.map fst
+    /// <summary>
+    ///     Combines two resource registries into one.
+    /// </summary>
+    /// <param name="resources">Resources to be combined.</param>
+    static member Combine(resources : seq<ResourceRegistry>) =
+        let mutable index = Map.empty
+        for r in resources do
+            for kv in r.Index do
+                index <- Map.add kv.Key kv.Value index
+        new ResourceRegistry(index)
 
 /// Exception raised on missing resource resolution
 and [<AutoSerializable(true)>] ResourceNotFoundException =
@@ -56,10 +91,11 @@ and [<AutoSerializable(true)>] ResourceNotFoundException =
 module ResourceBuilder =
 
     type ResourceBuilder () =
+        member __.Zero () = ResourceRegistry.Empty
         member __.Delay (f : unit -> ResourceRegistry) = f ()
         member __.Yield<'TResource> (resource : 'TResource) = ResourceRegistry.Empty.Register<'TResource> (resource)
         member __.YieldFrom (registry : ResourceRegistry) = registry
-        member __.Combine(registry : ResourceRegistry, registry' : ResourceRegistry) = registry.CombineWith registry'
+        member __.Combine(registry : ResourceRegistry, registry' : ResourceRegistry) = ResourceRegistry.Combine(registry, registry')
 
     /// resource registry builder
     let resource = new ResourceBuilder()

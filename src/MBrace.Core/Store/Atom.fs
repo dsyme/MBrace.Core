@@ -1,5 +1,7 @@
 ﻿namespace MBrace
 
+open MBrace.Continuation
+
 /// Represent a distributed atomically updatable value reference
 type ICloudAtom<'T> =
     inherit ICloudDisposable
@@ -7,24 +9,21 @@ type ICloudAtom<'T> =
     /// Cloud atom identifier
     abstract Id : string
 
-    /// Returns the current value of atom.
-    abstract Value : 'T
-
-    /// Asynchronously returns the current value of atom.
-    abstract GetValue : unit -> Async<'T>
+    /// Gets the current value of the atom.
+    abstract Value : Cloud<'T>
 
     /// <summary>
     ///     Atomically updates table entry of given id using updating function.
     /// </summary>
     /// <param name="updater">Value updating function</param>
     /// <param name="maxRetries">Maximum retries under optimistic semantics. Defaults to infinite.</param>
-    abstract Update : updater:('T -> 'T) * ?maxRetries:int -> Async<unit>
+    abstract Update : updater:('T -> 'T) * ?maxRetries:int -> Cloud<unit>
 
     /// <summary>
     ///      Forces a value on atom.
     /// </summary>
     /// <param name="value">value to be set.</param>
-    abstract Force : value:'T -> Async<unit>
+    abstract Force : value:'T -> Cloud<unit>
 
 [<AutoOpen>]
 module CloudAtomUtils =
@@ -35,9 +34,11 @@ module CloudAtomUtils =
         ///     Performs transaction on atom.
         /// </summary>
         /// <param name="transaction">Transaction function.</param>
-        member atom.Transact(transaction : 'T -> 'R * 'T) : Async<'R> = async {
+        /// <param name="maxRetries">Maximum retries under optimistic semantics. Defaults to infinite.</param>
+        member atom.Transact(transaction : 'T -> 'R * 'T, ?maxRetries : int) : Cloud<'R> = cloud {
             let result = ref Unchecked.defaultof<'R>
-            do! atom.Update(fun t -> let r,t' = transaction t in result := r ; t')
+            let updater t = let r,t' = transaction t in result := r ; t'
+            do! atom.Update(updater, ?maxRetries = maxRetries)
             return result.Value
         }
 
@@ -77,13 +78,25 @@ type ICloudAtomProvider =
     abstract DisposeContainer : container:string -> Async<unit>
 
 /// Atom configuration passed to the continuation execution context
-type AtomConfiguration =
+type CloudAtomConfiguration =
     {
         /// Atom provider instance
         AtomProvider : ICloudAtomProvider
         /// Default container for instance in current execution context.
         DefaultContainer : string
     }
+with
+    /// <summary>
+    ///     Creates an atom configuration instance using provided components.
+    /// </summary>
+    /// <param name="atomProvider">Atom provider instance.</param>
+    /// <param name="defaultContainer">Default container for current process. Defaults to auto generated.</param>
+    static member Create(atomProvider : ICloudAtomProvider, ?defaultContainer : string) =
+        {
+            AtomProvider = atomProvider
+            DefaultContainer = match defaultContainer with Some c -> c | None -> atomProvider.CreateUniqueContainerName()
+        }
+
 
 namespace MBrace
 
@@ -98,56 +111,94 @@ type CloudAtom =
     ///     Creates a new cloud atom instance with given value.
     /// </summary>
     /// <param name="initial">Initial value.</param>
-    static member New<'T>(initial : 'T) : Cloud<ICloudAtom<'T>> = cloud {
-        let! config = Cloud.GetResource<AtomConfiguration> ()
-        return! Cloud.OfAsync <| config.AtomProvider.CreateAtom(config.DefaultContainer, initial)
+    static member New<'T>(initial : 'T, ?container : string) : Cloud<ICloudAtom<'T>> = cloud {
+        let! config = Cloud.GetResource<CloudAtomConfiguration> ()
+        let container = defaultArg container config.DefaultContainer
+        return! ofAsync <| config.AtomProvider.CreateAtom(container, initial)
     }
 
     /// <summary>
     ///     Dereferences a cloud atom.
     /// </summary>
     /// <param name="atom">Atom instance.</param>
-    static member Read(atom : ICloudAtom<'T>) : Cloud<'T> = Cloud.OfAsync <| atom.GetValue()
+    static member Read(atom : ICloudAtom<'T>) : Cloud<'T> = cloud {
+        return! atom.Value
+    }
 
     /// <summary>
     ///     Atomically updates the contained value.
     /// </summary>
     /// <param name="updater">value updating function.</param>
     /// <param name="atom">Atom instance to be updated.</param>
-    static member Update (updateF : 'T -> 'T) (atom : ICloudAtom<'T>) : Cloud<unit> = 
-        Cloud.OfAsync <| atom.Update updateF
+    /// <param name="maxRetries">Maximum number of retries before giving up. Defaults to infinite.</param>
+    static member Update (atom : ICloudAtom<'T>, updateF : 'T -> 'T, ?maxRetries : int)  : Cloud<unit> = cloud {
+        return! atom.Update(updateF, ?maxRetries = maxRetries)
+    }
 
     /// <summary>
     ///     Forces the contained value to provided argument.
     /// </summary>
     /// <param name="value">Value to be set.</param>
     /// <param name="atom">Atom instance to be updated.</param>
-    static member Force (value : 'T) (atom : ICloudAtom<'T>) : Cloud<unit> =
-        Cloud.OfAsync <| atom.Force value
+    static member Force (atom : ICloudAtom<'T>, value : 'T) : Cloud<unit> = cloud {
+        return! atom.Force value
+    }
 
     /// <summary>
     ///     Transactionally updates the contained value.
     /// </summary>
-    /// <param name="trasactF"></param>
-    /// <param name="atom"></param>
-    static member Transact (trasactF : 'T -> 'R * 'T) (atom : ICloudAtom<'T>) : Cloud<'R> =
-        Cloud.OfAsync <| atom.Transact trasactF
+    /// <param name="atom">Input atom.</param>
+    /// <param name="trasactF">Transaction function.</param>
+    /// <param name="maxRetries">Maximum number of retries before giving up. Defaults to infinite.</param>
+    static member Transact (atom : ICloudAtom<'T>, trasactF : 'T -> 'R * 'T, ?maxRetries : int)  : Cloud<'R> = cloud {
+        return! atom.Transact trasactF
+    }
 
     /// <summary>
     ///     Deletes the provided atom instance from store.
     /// </summary>
     /// <param name="atom">Atom instance to be deleted.</param>
-    static member Delete (atom : ICloudAtom<'T>) = Cloud.Dispose atom
+    static member Delete (atom : ICloudAtom<'T>) = dispose atom
 
+    /// <summary>
+    ///     Deletes container and all its contained atoms.
+    /// </summary>
+    /// <param name="container"></param>
+    static member DeleteContainer (container : string) = cloud {
+        let! config = Cloud.GetResource<CloudAtomConfiguration> ()
+        return! ofAsync <| config.AtomProvider.DisposeContainer container
+    }
+
+    /// Generates a unique container name.
+    static member CreateContainerName() = cloud {
+        let! config = Cloud.GetResource<CloudAtomConfiguration> ()
+        return config.AtomProvider.CreateUniqueContainerName()
+    }
 
     /// <summary>
     ///     Checks if value is supported by current table store.
     /// </summary>
     /// <param name="value">Value to be checked.</param>
     static member IsSupportedValue(value : 'T) = cloud {
-        let! config = Cloud.TryGetResource<AtomConfiguration> ()
+        let! config = Cloud.TryGetResource<CloudAtomConfiguration> ()
         return
             match config with
             | None -> false
             | Some ap -> ap.AtomProvider.IsSupportedValue value
+    }
+
+    /// <summary>
+    ///     Increments a cloud counter by one.
+    /// </summary>
+    /// <param name="atom">Input atom.</param>
+    static member inline Incr (atom : ICloudAtom<'T>) = cloud {
+        return! atom.Update (fun i -> i + LanguagePrimitives.GenericOne)
+    }
+
+    /// <summary>
+    ///     Decrements a cloud counter by one.
+    /// </summary>
+    /// <param name="atom">Input atom.</param>
+    static member inline Decr (atom : ICloudAtom<'T>) = cloud {
+        return! atom.Update (fun i -> i - LanguagePrimitives.GenericOne)
     }

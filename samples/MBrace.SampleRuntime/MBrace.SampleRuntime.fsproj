@@ -22,6 +22,7 @@
     <DefineConstants>DEBUG;TRACE</DefineConstants>
     <WarningLevel>3</WarningLevel>
     <DocumentationFile>..\..\bin\MBrace.SampleRuntime.XML</DocumentationFile>
+    <Prefer32Bit>false</Prefer32Bit>
   </PropertyGroup>
   <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Release|AnyCPU' ">
     <DebugType>pdbonly</DebugType>
@@ -31,6 +32,7 @@
     <DefineConstants>TRACE</DefineConstants>
     <WarningLevel>3</WarningLevel>
     <DocumentationFile>..\..\bin\MBrace.SampleRuntime.XML</DocumentationFile>
+    <Prefer32Bit>false</Prefer32Bit>
   </PropertyGroup>
   <PropertyGroup>
     <MinimumVisualStudioVersion Condition="'$(MinimumVisualStudioVersion)' == ''">11</MinimumVisualStudioVersion>
@@ -69,11 +71,6 @@
     <None Include="paket.references" />
   </ItemGroup>
   <ItemGroup>
-    <ProjectReference Include="..\..\src\MBrace.Library\MBrace.Library.fsproj">
-      <Name>MBrace.Library</Name>
-      <Project>{51606ffc-69bb-4755-8454-9e943e2b7290}</Project>
-      <Private>True</Private>
-    </ProjectReference>
     <ProjectReference Include="..\..\src\MBrace.Runtime.Core\MBrace.Runtime.Core.fsproj">
       <Name>MBrace.Runtime.Core</Name>
       <Project>{bb4a3241-4d46-4888-861d-a34440ecfe8b}</Project>
@@ -126,8 +123,8 @@
   <Choose>
     <When Condition="($(TargetFrameworkIdentifier) == '.NETFramework' And ($(TargetFrameworkVersion) == 'v4.5' Or $(TargetFrameworkVersion) == 'v4.5.1' Or $(TargetFrameworkVersion) == 'v4.5.2' Or $(TargetFrameworkVersion) == 'v4.5.3')) Or ($(TargetFrameworkIdentifier) == 'MonoAndroid') Or ($(TargetFrameworkIdentifier) == 'MonoTouch')">
       <ItemGroup>
-        <Reference Include="Vagrant">
-          <HintPath>..\..\packages\Vagrant\lib\net45\Vagrant.dll</HintPath>
+        <Reference Include="Vagabond">
+          <HintPath>..\..\packages\Vagabond\lib\net45\Vagabond.dll</HintPath>
           <Private>True</Private>
           <Paket>True</Paket>
         </Reference>

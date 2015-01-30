@@ -17,7 +17,9 @@ open MBrace.Continuation
 
 /// Representation of a cloud computation, which, when run 
 /// will produce a value of type 'T, or raise an exception.
-type Cloud<'T> = internal Body of (ExecutionContext -> Continuation<'T> -> unit)
+[<Sealed; AutoSerializable(true)>]
+type Cloud<'T> internal (body : ExecutionContext -> Continuation<'T> -> unit) =
+    member internal __.Body = body
 
 /// Adding this attribute to a let-binding marks that
 /// the value definition contains cloud expressions.
@@ -30,4 +32,4 @@ type NoWarnAttribute() = inherit System.Attribute()
 /// Denotes handle to a distributable resource that can be disposed of.
 type ICloudDisposable =
     /// Releases any storage resources used by this object.
-    abstract Dispose : unit -> Async<unit>
+    abstract Dispose : unit -> Cloud<unit>

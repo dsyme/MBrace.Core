@@ -1,11 +1,11 @@
 ﻿#I "../../bin/"
 
 #r "MBrace.Core.dll"
-#r "MBrace.Library.dll"
 #r "MBrace.SampleRuntime.exe"
 
 open System
 open MBrace
+open MBrace.Workflows
 open MBrace.SampleRuntime
 
 MBraceRuntime.WorkerExecutable <- __SOURCE_DIRECTORY__ + "/../../bin/MBrace.SampleRuntime.exe"
@@ -18,7 +18,7 @@ runtime.Run(
         let rec sender n = cloud {
             if n = 0 then return ()
             else
-                do! CloudChannel.Send n sp
+                do! CloudChannel.Send (sp, n)
                 return! sender (n-1)
         }
 
@@ -38,20 +38,9 @@ let getWordCount inputSize =
     let map (text : string) = cloud { return text.Split(' ').Length }
     let reduce i i' = cloud { return i + i' }
     let inputs = Array.init inputSize (fun i -> "lorem ipsum dolor sit amet")
-    MapReduce.mapReduce map 0 reduce inputs
+    Distributed.mapReduce map reduce 0 inputs
 
-type Cloud with
-    static member All (one : IWorkerRef -> Cloud<'T>) : Cloud<'T []> =
-        cloud {
-            let! wr = Cloud.GetAvailableWorkers()
-            let! handles = wr |> Array.map (fun w -> Cloud.StartChild(one w,w))
-                              |> Cloud.Parallel
-            return! handles |> Cloud.Parallel
-        }
-
-runtime.Run(Cloud.All (fun w -> cloud.Return w.Id))
-
-runtime.Run(Cloud.All (fun _ -> Cloud.GetWorkerCount()))
+runtime.Run (getWordCount 1000)
 
 runtime.KillAllWorkers()
 runtime.AppendWorkers 4
@@ -61,3 +50,17 @@ let t2 = runtime.RunAsTask(Cloud.Sleep 20000)
 let t3 = runtime.RunAsTask(Cloud.WithFaultPolicy FaultPolicy.NoRetry (Cloud.Sleep 20000 <||> Cloud.Sleep 20000))
 
 t1.Result
+
+let rec stackOverflow () = 1 + stackOverflow()
+
+let rec test () = cloud {
+    try
+        let! wf = Cloud.StartChild(cloud { return stackOverflow() })
+        return! wf
+    with _ -> 
+        return! test ()
+//        let! wf = Cloud.StartChild(test ())
+//        return! wf
+}
+
+runtime.Run(test(), faultPolicy = FaultPolicy.NoRetry)

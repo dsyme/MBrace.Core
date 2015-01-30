@@ -9,14 +9,23 @@ namespace MBrace.CSharp
 {
     public static partial class Cloud
     {
-        public static CloudUnit Log(string format, params object[] args)
+        /// <summary>
+        ///     Writes the following message to MBrace logging interface.
+        /// </summary>
+        /// <param name="format">Format string.</param>
+        /// <param name="args">Arguments to format string.</param>
+        public static CloudAction Log(string format, params object[] args)
         {
-            return new CloudUnit(MCloud.Log(String.Format(format, args)));
+            return new CloudAction(MCloud.Log(String.Format(format, args)));
         }
 
-        public static CloudUnit Sleep(int millisecondsDue)
+        /// <summary>
+        ///     Asynchronously suspends workflow for given amount of milliseconds.
+        /// </summary>
+        /// <param name="millisecondsDue">Milliseconds to suspend computation.</param>
+        public static CloudAction Sleep(int millisecondsDue)
         {
-            return new CloudUnit(MCloud.Sleep(millisecondsDue));
+            return new CloudAction(MCloud.Sleep(millisecondsDue));
         }
 
     }
