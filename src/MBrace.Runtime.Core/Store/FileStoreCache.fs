@@ -30,7 +30,9 @@ type FileStoreCache private (sourceStore : ICloudFileStore, localCacheStore : IC
                                 cacheBehavior : CacheBehavior, localCacheContainer : string) =
 
     let getCachedFileName (path : string) = localCacheStore.Combine [|localCacheContainer ; Convert.StringToBase32 path|]
-    let cacheEvent = new Event<string> ()
+    static let cacheEvent = new Event<string> ()
+
+    static member OnCache = cacheEvent.Publish
 
     member this.Container = localCacheContainer
     member this.CacheStore = localCacheStore
