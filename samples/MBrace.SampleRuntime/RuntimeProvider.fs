@@ -1,4 +1,4 @@
-﻿﻿module internal MBrace.SampleRuntime.RuntimeProvider
+﻿module internal MBrace.SampleRuntime.RuntimeProvider
 
 //
 //  Implements the scheduling context for sample runtime.

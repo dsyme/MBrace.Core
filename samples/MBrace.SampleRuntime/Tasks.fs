@@ -1,4 +1,4 @@
-﻿﻿module internal MBrace.SampleRuntime.Tasks
+﻿module internal MBrace.SampleRuntime.Tasks
 
 // Provides facility for the execution of tasks.
 // In this context, a task denotes a single work item to be sent
@@ -193,7 +193,7 @@ type RuntimeState =
         IPEndPoint : System.Net.IPEndPoint
         /// Reference to the global task queue employed by the runtime
         /// Queue contains pickled task and its vagrant dependency manifestppp
-        TaskQueue : PartIndexedQueue<string (* IWorkerRef.Id *), Pickle<Task> * AssemblyId list>
+        TaskQueue : PartIndexedQueue<string (* IWorkerRef.Id *), PickledTask>
         /// Reference to a Vagrant assembly exporting actor.
         AssemblyExporter : AssemblyExporter
         /// Reference to the runtime resource manager
@@ -241,7 +241,10 @@ with
     /// <param name="cc">Cancellation continuation</param>
     /// <param name="wf">Workflow</param>
     member rt.EnqueueTask procInfo dependencies cts fp sc ec cc worker (wf : Cloud<'T>) : unit =
-        rt.TaskQueue.Enqueue <| PickledTask.CreateTask procInfo dependencies cts fp sc ec cc worker wf
+        let taskId = System.Guid.NewGuid().ToString()
+        let startTask ctx =
+            let cont = { Success = sc ; Exception = ec ; Cancellation = cc }
+            Cloud.StartWithContinuations(wf, cont, ctx)
 
         let task =
             {
@@ -254,14 +257,31 @@ with
                 CancellationTokenSource = cts
             }
 
-        let taskp = VagrantRegistry.Pickler.PickleTyped task
+        let taskp = Config.getSerializer().Pickler.PickleTyped task
+
+        let pickledTask = { Task = taskp ; Dependencies = dependencies ; Target = worker }
+
+
+        // rt.TaskQueue.UnindexedEnqueue <| PickledTask.CreateTask procInfo dependencies cts fp sc ec cc worker wf
+        // let task =
+        //     {
+        //         Type = typeof<'T>
+        //         ProcessInfo = procInfo
+        //         TaskId = taskId
+        //         StartTask = startTask
+        //         FaultPolicy = fp
+        //         Econt = ec
+        //         CancellationTokenSource = cts
+        //     }
+
+        // let taskp = VagrantRegistry.Pickler.PickleTyped taskP
 
         let storeEntities =
             StorageEntity.GatherStoreEntitiesInObjectGraph(startTask)
             |> Seq.map (fun s -> s.Id)
             |> Seq.toArray
 
-        if Array.length storeEntities = 0 then rt.TaskQueue.UnindexedEnqueue(taskp, dependencies)
+        if Array.length storeEntities = 0 then rt.TaskQueue.UnindexedEnqueue(pickledTask)
         else
             let picture = rt.StoreCacheMap.GetPicture(storeEntities)
             let selectedWorkerId =
@@ -273,7 +293,13 @@ with
                 |> Seq.head
 
 
-            rt.TaskQueue.Enqueue(selectedWorkerId, (taskp, dependencies))
+            rt.TaskQueue.Enqueue(selectedWorkerId, pickledTask)
+
+    /// <summary>
+    /// Atomically schedule a collection of tasks
+    /// </summary>
+    /// <param name="tasks">Tasks to be enqueued</param>
+    member rt.EnqueueTasks tasks = for task in tasks do rt.TaskQueue.UnindexedEnqueue(task)
 
     /// <summary>
     ///     Schedules a cloud workflow as a distributed result cell.
@@ -302,10 +328,10 @@ with
         let! item = rt.TaskQueue.TryUnindexedDequeue()
         match item with
         | None -> return None
-        | Some ((tp, deps), faultCount, leaseMonitor) ->
-            do! rt.AssemblyExporter.LoadDependencies deps
-            let task = VagrantRegistry.Pickler.UnPickleTyped tp
-            return Some (task, deps, faultCount, leaseMonitor)
+        | Some (pt, faultCount, leaseMonitor) ->
+            do! rt.AssemblyExporter.LoadDependencies pt.Dependencies
+            let task = Config.getSerializer().Pickler.UnPickleTyped pt.Task
+            return Some (task, pt.Dependencies, faultCount, leaseMonitor)
     }
 
     /// Attempt to dequeue a task from the runtime task queue of specific worker
@@ -313,10 +339,10 @@ with
         let! item = rt.TaskQueue.TryDequeue(workerId)
         match item with
         | None -> return None
-        | Some ((tp, deps), faultCount, leaseMonitor) ->
-            do! rt.AssemblyExporter.LoadDependencies deps
-            let task = VagrantRegistry.Pickler.UnPickleTyped tp
-            return Some (task, deps, faultCount, leaseMonitor)
+        | Some (pt, faultCount, leaseMonitor) ->
+            do! rt.AssemblyExporter.LoadDependencies pt.Dependencies
+            let task = Config.getSerializer().Pickler.UnPickleTyped pt.Task
+            return Some (task, pt.Dependencies, faultCount, leaseMonitor)
     }
 
 type LocalRuntimeState =

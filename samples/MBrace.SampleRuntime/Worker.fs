@@ -1,4 +1,4 @@
-﻿﻿module internal MBrace.SampleRuntime.Worker
+﻿module internal MBrace.SampleRuntime.Worker
 
 open System.Diagnostics
 open System.Threading
@@ -34,7 +34,7 @@ let initWorker (localRuntime : LocalRuntimeState) (maxConcurrentTasks : int) = a
         let channelProvider = new ActorChannelProvider(runtime)
         Task.RunAsync runtimeProvider atomProvider channelProvider deps faultCount t
 
-    FileStoreCache.OnCache |> Event.add (fun (_, storeEntityId) -> runtime.StoreCacheMap.Cache(localRuntime.WorkerRef.Id, [| storeEntityId |]))
+    //FileStoreCache.OnCache |> Event.add (fun (_, storeEntityId) -> runtime.StoreCacheMap.Cache(localRuntime.WorkerRef.Id, [| storeEntityId |]))
 
     let rec loop () = async {
         if !currentTaskCount >= maxConcurrentTasks then

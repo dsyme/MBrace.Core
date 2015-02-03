@@ -1,4 +1,4 @@
-﻿﻿namespace MBrace.SampleRuntime.Actors
+﻿namespace MBrace.SampleRuntime.Actors
 
 //
 //  Implements a collection of distributed resources that provide
@@ -513,7 +513,7 @@ type DistributedQueue<'T, 'DequeueToken'> private (source : ActorRef<QueueMsg<'T
             |> Actor.Publish
             |> Actor.ref
 
-        new DistributedQueue<'T>(self.Value)
+        new DistributedQueue<'T, 'DequeueToken>(self.Value)
 
 type private PartIndexedQueueMsg<'K, 'T> =
     | UnindexedEnqueue of 'T * (* fault count *) int
