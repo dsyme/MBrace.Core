@@ -283,12 +283,19 @@ with
 
         if Array.length storeEntities = 0 then rt.TaskQueue.UnindexedEnqueue(pickledTask)
         else
-            let picture = rt.StoreCacheMap.GetPicture(storeEntities)
+            let queuePicture =
+                rt.TaskQueue.GetPicture()
+                |> Map.ofArray
+
+            let cachePicture = rt.StoreCacheMap.GetPicture(storeEntities)
             let selectedWorkerId =
-                picture
+                cachePicture
                 |> Seq.collect (fun (storeEntity, workerIds) -> workerIds |> Seq.map (fun workerId -> storeEntity, workerId))
                 |> Seq.groupBy snd
-                |> Seq.sortBy (fun (workerId, data) -> -(Seq.length data))
+                |> Seq.sortBy (fun (workerId, data) ->
+                                   match queuePicture.TryFind workerId with
+                                   | None -> -(Seq.length data)
+                                   | Some count -> -(Seq.length data) + count)
                 |> Seq.map fst
                 |> Seq.head
 

@@ -482,6 +482,8 @@ type private ImmutableQueue<'T> private (front : 'T list, back : 'T list) =
             | [] -> None
             | hd :: tl -> Some(hd, new ImmutableQueue<'T>(tl, []))
 
+    member __.Length = front.Length + back.Length
+
 /// Provides a distributed, fault-tolerant queue implementation
 type DistributedQueue<'T, 'DequeueToken'> private (source : ActorRef<QueueMsg<'T, 'DequeueToken'>>) =
     member __.Enqueue (t : 'T) = source <-- EnQueue (t, 0)
@@ -520,12 +522,15 @@ type private PartIndexedQueueMsg<'K, 'T> =
     | IndexedEnqueue of 'K * 'T * (* fault count *) int
     | TryIndexedDequeue of IReplyChannel<('T * (* fault count *) int * LeaseMonitor) option> * 'K
     | TryUnindexedDequeue of IReplyChannel<('T * (* fault count *) int * LeaseMonitor) option>
+    | GetPicture of IReplyChannel<('K * int) []>
+    | GetPictureOf of IReplyChannel<int> * 'K
 
 type PartIndexedQueue<'K, 'T when 'K : comparison> private (source : ActorRef<PartIndexedQueueMsg<'K, 'T>>) =
     member __.Enqueue(key: 'K, t: 'T) = source <-- IndexedEnqueue(key, t, 0)
     member __.UnindexedEnqueue(t: 'T) = source <-- UnindexedEnqueue(t, 0)
     member __.TryDequeue(key: 'K) = source <!- fun ch -> TryIndexedDequeue(ch, key)
     member __.TryUnindexedDequeue() = source <!- fun ch -> TryUnindexedDequeue(ch)
+    member __.GetPicture() = source <!= GetPicture
 
     static member Init() =
         let self = ref Unchecked.defaultof<ActorRef<PartIndexedQueueMsg<'K, 'T>>>
@@ -560,6 +565,21 @@ type PartIndexedQueue<'K, 'T when 'K : comparison> private (source : ActorRef<Pa
                         do! ch.Reply (Some (t, faultCount, leaseMonitor))
                         let _ = putBack.Subscribe(fun () -> self.Value <-- UnindexedEnqueue (t, faultCount + 1))
                         return queueIndex, queue'
+                | GetPicture ch ->
+                    let picture =
+                         queueIndex
+                         |> Map.toSeq
+                         |> Seq.map (fun (k, queue) -> k, queue.Length)
+                         |> Seq.toArray
+
+                    do! ch.Reply picture
+
+                    return queueIndex, unindexedQueue
+                | GetPictureOf(ch, k) ->
+                    match queueIndex.TryFind k with
+                    | Some queue -> do! ch.Reply queue.Length
+                    | None -> do! ch.Reply 0
+                    return queueIndex, unindexedQueue
             }
 
         self :=
