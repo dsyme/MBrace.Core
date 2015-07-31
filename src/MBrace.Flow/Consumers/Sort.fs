@@ -28,7 +28,7 @@ module Sort =
     /// <param name="takeCount"></param>
     /// <param name="flow"></param>
     let sortByGen (comparer : IComparer<'Key>) (projection : ExecutionContext -> 'T -> 'Key) (takeCount : int) (flow : CloudFlow<'T>) : CloudFlow<'T> =
-        let collectorf (cloudCts : ICloudCancellationTokenSource) = local {
+        let collectorf (cloudCts : ICloudCancellationTokenSource) = cloud0 {
             let results = new List<List<'T>>()
             let! ctx = Cloud.GetExecutionContext()
             let cts = CancellationTokenSource.CreateLinkedTokenSource(cloudCts.Token.LocalToken)
@@ -65,7 +65,7 @@ module Sort =
         let sortByComp =
             cloud {
                 let! cts = Cloud.CreateCancellationTokenSource()
-                let! results = flow.WithEvaluators (collectorf cts) (fun x -> local { return x }) (fun result -> local { match result with [||] -> return List() | _ -> return Array.reduce (fun left right -> left.AddRange(right); left) result })
+                let! results = flow.WithEvaluators (collectorf cts) (fun x -> cloud0 { return x }) (fun result -> cloud0 { match result with [||] -> return List() | _ -> return Array.reduce (fun left right -> left.AddRange(right); left) result })
                 let result =
                     let count = results |> Seq.sumBy (fun (keys, _) -> keys.Length)
                     let keys = Array.zeroCreate<'Key> count
@@ -87,7 +87,7 @@ module Sort =
 
         { new CloudFlow<'T> with
             member self.DegreeOfParallelism = flow.DegreeOfParallelism
-            member self.WithEvaluators<'S, 'R> (collectorf : Local<Collector<'T, 'S>>) (projection : 'S -> Local<'R>) combiner =
+            member self.WithEvaluators<'S, 'R> (collectorf : Cloud0<Collector<'T, 'S>>) (projection : 'S -> Cloud0<'R>) combiner =
                 cloud {
                     let! result = sortByComp
                     return! (Array.ToCloudFlow result).WithEvaluators collectorf projection combiner

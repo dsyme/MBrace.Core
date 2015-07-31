@@ -208,7 +208,7 @@ type ``CloudFlow tests`` () as self =
     member __.``2. CloudFlow : ofCloudFiles with custom deserializer`` () =
         let f(xs : string [][]) =
             let cfs = xs 
-                     |> Array.map(fun text -> local { let! path = CloudPath.GetRandomFileName() in return! CloudFile.WriteAllLines(path, text) })
+                     |> Array.map(fun text -> cloud0 { let! path = CloudPath.GetRandomFileName() in return! CloudFile.WriteAllLines(path, text) })
                      |> Cloud.Parallel
                      |> runLocally
 
@@ -239,7 +239,7 @@ type ``CloudFlow tests`` () as self =
     member __.``2. CloudFlow : ofCloudFiles with ReadLines`` () =
         let f(xs : string [][]) =
             let cfs = xs 
-                     |> Array.map(fun text -> local { let! path = CloudPath.GetRandomFileName() in return! CloudFile.WriteAllLines(path, text) })
+                     |> Array.map(fun text -> cloud0 { let! path = CloudPath.GetRandomFileName() in return! CloudFile.WriteAllLines(path, text) })
                      |> Cloud.Parallel
                      |> runLocally
 
@@ -260,7 +260,7 @@ type ``CloudFlow tests`` () as self =
     member __.``2. CloudFlow : ofCloudFilesByLine with ReadLines`` () =
         let f(xs : string [][]) =
             let cfs = xs 
-                     |> Array.map(fun text -> local { let! path = CloudPath.GetRandomFileName() in return! CloudFile.WriteAllLines(path, text) })
+                     |> Array.map(fun text -> cloud0 { let! path = CloudPath.GetRandomFileName() in return! CloudFile.WriteAllLines(path, text) })
                      |> Cloud.Parallel
                      |> runLocally
 
@@ -339,7 +339,7 @@ type ``CloudFlow tests`` () as self =
     member __.``2. CloudFlow : ofCloudFiles with ReadAllLines`` () =
         let f(xs : string [][]) =
             let cfs = xs 
-                     |> Array.map(fun text -> local { let! path = CloudPath.GetRandomFileName() in return! CloudFile.WriteAllLines(path, text) })
+                     |> Array.map(fun text -> cloud0 { let! path = CloudPath.GetRandomFileName() in return! CloudFile.WriteAllLines(path, text) })
                      |> Cloud.Parallel
                      |> runLocally
 

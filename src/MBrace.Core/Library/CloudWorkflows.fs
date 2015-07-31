@@ -152,7 +152,7 @@ module Sequential =
 [<RequireQualifiedAccess>]
 module Balanced =
 
-    let private lift f t = local { return f t }
+    let private lift f t = cloud0 { return f t }
 
     /// <summary>
     ///     General-purpose distributed reduce/combine combinator. Inputs are balanced across the
@@ -161,11 +161,11 @@ module Balanced =
     /// <param name="reducer">Single-threaded reduce function. Reduces a materialized collection of inputs to an intermediate result.</param>
     /// <param name="combiner">Combiner function that aggregates intermediate results into one.</param>
     /// <param name="source">Input data.</param>
-    let reduceCombine (reducer : 'T [] -> Local<'State>) 
-                        (combiner : 'State [] -> Local<'State>) 
+    let reduceCombine (reducer : 'T [] -> Cloud0<'State>) 
+                        (combiner : 'State [] -> Cloud0<'State>) 
                         (source : seq<'T>) : Cloud<'State> =
 
-        let reduceCombineLocal (inputs : 'T[]) = local {
+        let reduceCombineLocal (inputs : 'T[]) = cloud0 {
             if inputs.Length < 2 then return! reducer inputs
             else
                 let cores = System.Environment.ProcessorCount
@@ -173,7 +173,7 @@ module Balanced =
                 let! results =
                     chunks
                     |> Array.map reducer
-                    |> Local.Parallel
+                    |> Cloud0.Parallel
 
                 return! combiner results
         }
@@ -199,8 +199,8 @@ module Balanced =
     /// </summary>
     /// <param name="mapper">Mapper function.</param>
     /// <param name="source">Input data.</param>
-    let mapLocal (mapper : 'T -> Local<'S>) (source : seq<'T>) : Cloud<'S []> = 
-        reduceCombine (Local.Sequential.map mapper) (lift Array.concat) source
+    let mapCloud (mapper : 'T -> Cloud0<'S>) (source : seq<'T>) : Cloud<'S []> = 
+        reduceCombine (Cloud0.Sequential.map mapper) (lift Array.concat) source
 
     /// <summary>
     ///     Distributed map combinator. Computation is balanced across the
@@ -217,8 +217,8 @@ module Balanced =
     /// </summary>
     /// <param name="predicate">Predicate function.</param>
     /// <param name="source">Input data.</param>
-    let filterLocal (predicate : 'T -> Local<bool>) (source : seq<'T>) : Cloud<'T []> =
-        reduceCombine (Local.Sequential.filter predicate) (lift Array.concat) source
+    let filterCloud (predicate : 'T -> Cloud0<bool>) (source : seq<'T>) : Cloud<'T []> =
+        reduceCombine (Cloud0.Sequential.filter predicate) (lift Array.concat) source
 
     /// <summary>
     ///     Distributed filter combinator. Computation is balanced across the
@@ -235,8 +235,8 @@ module Balanced =
     /// </summary>
     /// <param name="chooser">Chooser function.</param>
     /// <param name="source">Input data.</param>
-    let chooseLocal (chooser : 'T -> Local<'S option>) (source : seq<'T>) : Cloud<'S []> =
-        reduceCombine (Local.Sequential.choose chooser) (lift Array.concat) source
+    let chooseCloud (chooser : 'T -> Cloud0<'S option>) (source : seq<'T>) : Cloud<'S []> =
+        reduceCombine (Cloud0.Sequential.choose chooser) (lift Array.concat) source
 
     /// <summary>
     ///     Distributed choose combinator. Computation is balanced across the
@@ -253,8 +253,8 @@ module Balanced =
     /// </summary>
     /// <param name="collector">Collector function.</param>
     /// <param name="source">Input data.</param>
-    let collectLocal (collector : 'T -> Local<#seq<'S>>) (source : seq<'T>) =
-        reduceCombine (Local.Sequential.collect collector) (lift Array.concat) source
+    let collectCloud (collector : 'T -> Cloud0<#seq<'S>>) (source : seq<'T>) =
+        reduceCombine (Cloud0.Sequential.collect collector) (lift Array.concat) source
 
     /// <summary>
     ///     Distrbuted collect combinator. Computation is balanced across the
@@ -271,8 +271,8 @@ module Balanced =
     /// </summary>
     /// <param name="body">Iterator body.</param>
     /// <param name="source">Input sequence.</param>
-    let iterLocal (body : 'T -> Local<unit>) (source : seq<'T>) : Cloud<unit> =
-        reduceCombine (Local.Sequential.iter body) (fun _ -> local.Zero()) source
+    let iterCloud (body : 'T -> Cloud0<unit>) (source : seq<'T>) : Cloud<unit> =
+        reduceCombine (Cloud0.Sequential.iter body) (fun _ -> cloud0.Zero()) source
 
     /// <summary>
     ///     Distributed fold combinator. Partitions inputs, folding distrbutively
@@ -283,11 +283,11 @@ module Balanced =
     /// <param name="reducer">Intermediate state reducing function.</param>
     /// <param name="init">Initial state and identity element.</param>
     /// <param name="source">Input data.</param>
-    let foldLocal (folder : 'State -> 'T -> Local<'State>)
-                    (reducer : 'State -> 'State -> Local<'State>)
+    let foldCloud (folder : 'State -> 'T -> Cloud0<'State>)
+                    (reducer : 'State -> 'State -> Cloud0<'State>)
                     (init : 'State) (source : seq<'T>) : Cloud<'State> =
 
-        reduceCombine (Local.Sequential.fold folder init) (Local.Sequential.fold reducer init) source
+        reduceCombine (Cloud0.Sequential.fold folder init) (Cloud0.Sequential.fold reducer init) source
 
     /// <summary>
     ///     Distributed fold combinator. Partitions inputs, folding distrbutively
@@ -319,17 +319,17 @@ module Balanced =
     /// <param name="reducer">State combining workflow.</param>
     /// <param name="init">State initializer workflow.</param>
     /// <param name="source">Input data.</param>
-    let foldByLocal (projection : 'T -> 'Key) 
-                    (folder : 'State -> 'T -> Local<'State>)
-                    (reducer : 'State -> 'State -> Local<'State>)
-                    (init : 'Key -> Local<'State>) (source : seq<'T>) : Cloud<('Key * 'State) []> = 
+    let foldByCloud (projection : 'T -> 'Key) 
+                    (folder : 'State -> 'T -> Cloud0<'State>)
+                    (reducer : 'State -> 'State -> Cloud0<'State>)
+                    (init : 'Key -> Cloud0<'State>) (source : seq<'T>) : Cloud<('Key * 'State) []> = 
 
-        let reduce (inputs : 'T []) = local {
+        let reduce (inputs : 'T []) = cloud0 {
             let dict = new Dictionary<'Key, 'State ref> ()
             for t in inputs do
                 let k = projection t
                 let ok, s = dict.TryGetValue k
-                let! stateRef = local {
+                let! stateRef = cloud0 {
                     if ok then return s 
                     else
                         let! init = init k
@@ -344,7 +344,7 @@ module Balanced =
             return dict |> Seq.map (fun kv -> kv.Key, kv.Value.Value) |> Seq.toArray
         }
 
-        let combine (results : ('Key * 'State) [][]) = local {
+        let combine (results : ('Key * 'State) [][]) = cloud0 {
             let dict = new Dictionary<'Key, 'State ref> ()
             for k,state in Seq.concat results do
                 let ok, stateRef = dict.TryGetValue k
@@ -375,7 +375,7 @@ module Balanced =
                 (reducer : 'State -> 'State -> 'State)
                 (init : 'Key -> 'State) (source : seq<'T>) : Cloud<('Key * 'State) []> = 
 
-        let reduce (inputs : 'T []) = local {
+        let reduce (inputs : 'T []) = cloud0 {
             let dict = new Dictionary<'Key, 'State ref> ()
             do for t in inputs do
                 let k = projection t
@@ -394,7 +394,7 @@ module Balanced =
             return dict |> Seq.map (fun kv -> kv.Key, kv.Value.Value) |> Seq.toArray
         }
 
-        let combine (results : ('Key * 'State) [][]) = local {
+        let combine (results : ('Key * 'State) [][]) = cloud0 {
             let dict = new Dictionary<'Key, 'State ref> ()
             for result in results do
                 for k,state in result do
@@ -418,7 +418,7 @@ module Balanced =
     /// <param name="projection">Projection function to group values by.</param>
     /// <param name="source">Input data.</param>
     let groupBy (projection : 'T -> 'Key) (source : seq<'T>) =
-        let reduce (inputs : 'T []) = local {
+        let reduce (inputs : 'T []) = cloud0 {
             let dict = new Dictionary<'Key, ResizeArray<'T>> ()
             do for t in inputs do
                 let k = projection t
@@ -435,7 +435,7 @@ module Balanced =
             return dict |> Seq.map (fun kv -> kv.Key, kv.Value.ToArray()) |> Seq.toArray
         }
 
-        let combine (results : ('Key * 'T[]) [][]) = local {
+        let combine (results : ('Key * 'T[]) [][]) = cloud0 {
             let dict = new Dictionary<'Key, ResizeArray<'T[]>> ()
             for result in results do
                 for k,ts in result do
@@ -461,8 +461,8 @@ module Balanced =
     /// <param name="projection">Summand projection function.</param>
     /// <param name="sources">Input data.</param>
     let inline sumBy (projection : 'T -> 'S) (sources : seq<'T>) =
-        reduceCombine (fun ts -> local { return Array.sumBy projection ts })
-                        (fun sums -> local { return Array.sum sums })
+        reduceCombine (fun ts -> cloud0 { return Array.sumBy projection ts })
+                        (fun sums -> cloud0 { return Array.sum sums })
                             sources
 
     /// <summary>
@@ -473,10 +473,10 @@ module Balanced =
     /// <param name="reducer">Reducer workflow.</param>
     /// <param name="init">Initial state and identity element.</param>
     /// <param name="source">Input source.</param>
-    let mapReduceLocal (mapper : 'T -> Local<'R>) (reducer : 'R -> 'R -> Local<'R>)
+    let mapReduceCloud (mapper : 'T -> Cloud0<'R>) (reducer : 'R -> 'R -> Cloud0<'R>)
                         (init : 'R) (source : seq<'T>) : Cloud<'R> =
 
-        foldLocal (fun s t -> local { let! s' = mapper t in return! reducer s s'})
+        foldCloud (fun s t -> cloud0 { let! s' = mapper t in return! reducer s s'})
                 reducer init source
 
     /// <summary>
@@ -504,8 +504,8 @@ module Balanced =
     /// </summary>
     /// <param name="chooser">Chooser function acting on partition.</param>
     /// <param name="source">Input data.</param>
-    let search (chooser : 'T [] -> Local<'S option>) (source : seq<'T>) : Cloud<'S option> =
-        let multiCoreSearch (inputs : 'T []) = local {
+    let search (chooser : 'T [] -> Cloud0<'S option>) (source : seq<'T>) : Cloud<'S option> =
+        let multiCoreSearch (inputs : 'T []) = cloud0 {
             if inputs.Length < 2 then return! chooser inputs 
             else
                 let cores = System.Environment.ProcessorCount
@@ -513,7 +513,7 @@ module Balanced =
                 return!
                     chunks
                     |> Array.map chooser
-                    |> Local.Choice
+                    |> Cloud0.Choice
         }
 
         cloud {
@@ -536,8 +536,8 @@ module Balanced =
     /// </summary>
     /// <param name="chooser">Chooser function.</param>
     /// <param name="source">Input data.</param>
-    let tryPickLocal (chooser : 'T -> Local<'S option>) (source : seq<'T>) : Cloud<'S option> =
-        search (Local.Sequential.tryPick chooser) source
+    let tryPickCloud (chooser : 'T -> Cloud0<'S option>) (source : seq<'T>) : Cloud<'S option> =
+        search (Cloud0.Sequential.tryPick chooser) source
 
     /// <summary>
     ///     Distributed tryPick combinator. Balances inputs across
@@ -556,8 +556,8 @@ module Balanced =
     /// </summary>
     /// <param name="predicate">Predicate function.</param>
     /// <param name="source">Input data.</param>
-    let tryFindLocal (predicate : 'T -> Local<bool>) (source : seq<'T>) : Cloud<'T option> =
-        tryPickLocal (fun t -> local { let! b = predicate t in return if b then Some t else None }) source
+    let tryFindCloud (predicate : 'T -> Cloud0<bool>) (source : seq<'T>) : Cloud<'T option> =
+        tryPickCloud (fun t -> cloud0 { let! b = predicate t in return if b then Some t else None }) source
 
     /// <summary>
     ///     Distributed tryFind combinator. Balances inputs across
@@ -576,8 +576,8 @@ module Balanced =
     /// </summary>
     /// <param name="predicate">Predicate function.</param>
     /// <param name="source">Input data.</param>
-    let forallLocal (predicate : 'T -> Local<bool>) (source : seq<'T>) : Cloud<bool> = cloud {
-        let! result = search (Local.Sequential.tryPick (fun t -> local { let! b = predicate t in return if b then None else Some () })) source
+    let forallCloud (predicate : 'T -> Cloud0<bool>) (source : seq<'T>) : Cloud<bool> = cloud {
+        let! result = search (Cloud0.Sequential.tryPick (fun t -> cloud0 { let! b = predicate t in return if b then None else Some () })) source
         return Option.isNone result
     }
 
@@ -589,7 +589,7 @@ module Balanced =
     /// <param name="predicate">Predicate function.</param>
     /// <param name="source">Input data.</param>
     let forall (predicate : 'T -> bool) (source : seq<'T>) : Cloud<bool> = cloud {
-        let! result = search (fun ts -> local { return if Array.forall predicate ts then None else Some () }) source
+        let! result = search (fun ts -> cloud0 { return if Array.forall predicate ts then None else Some () }) source
         return Option.isNone result
     }
 
@@ -600,8 +600,8 @@ module Balanced =
     /// </summary>
     /// <param name="predicate">Predicate function.</param>
     /// <param name="source">Input data.</param>
-    let existsLocal (predicate : 'T -> Local<bool>) (source : seq<'T>) : Cloud<bool> = cloud {
-        let! result = search (Local.Sequential.tryPick (fun t -> local { let! b = predicate t in return if b then Some () else None })) source
+    let existsCloud (predicate : 'T -> Cloud0<bool>) (source : seq<'T>) : Cloud<bool> = cloud {
+        let! result = search (Cloud0.Sequential.tryPick (fun t -> cloud0 { let! b = predicate t in return if b then Some () else None })) source
         return Option.isSome result
     }
 
@@ -613,6 +613,6 @@ module Balanced =
     /// <param name="predicate">Predicate function.</param>
     /// <param name="source">Input data.</param>
     let exists (predicate : 'T -> bool) (source : seq<'T>) : Cloud<bool> = cloud {
-        let! result = search (fun ts -> local { return if Array.exists predicate ts then Some () else None }) source
+        let! result = search (fun ts -> cloud0 { return if Array.exists predicate ts then Some () else None }) source
         return Option.isSome result
     }

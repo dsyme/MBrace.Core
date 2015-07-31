@@ -24,7 +24,7 @@ module Distinct =
     /// <returns>A flow of elements distinct on their keys.</returns>
     let distinctBy (projection : 'T -> 'Key) (source : CloudFlow<'T>) : CloudFlow<'T> =
         let collectorF (cloudCts : ICloudCancellationTokenSource) (totalWorkers : int) =
-            local {
+            cloud0 {
                 let dict = new ConcurrentDictionary<'Key, 'T>()
                 let cts = CancellationTokenSource.CreateLinkedTokenSource(cloudCts.Token.LocalToken)
                 return
@@ -42,12 +42,12 @@ module Distinct =
             }
         let shuffling =
             cloud {
-                let combiner' (result : _ []) = local { return Array.concat result }
-                let! totalWorkers = match source.DegreeOfParallelism with Some n -> local.Return n | None -> Cloud.GetWorkerCount()
+                let combiner' (result : _ []) = cloud0 { return Array.concat result }
+                let! totalWorkers = match source.DegreeOfParallelism with Some n -> cloud0.Return n | None -> Cloud.GetWorkerCount()
                 let! cts = Cloud.CreateCancellationTokenSource()
                 let! kvs = source.WithEvaluators (collectorF cts totalWorkers)
                                                  (fun kvs ->
-                                                      local {
+                                                      cloud0 {
                                                          let dict = new Dictionary<int, PersistedCloudFlow<'Key * 'T>>()
                                                          for (k, kvs') in kvs do
                                                              let! pkvs = PersistedCloudFlow.New(kvs', storageLevel = StorageLevel.Disk)
@@ -64,7 +64,7 @@ module Distinct =
                 return merged
             }
         let reducerF (cloudCts : ICloudCancellationTokenSource) =
-            local {
+            cloud0 {
                 let dict = new ConcurrentDictionary<'Key, 'T>()
                 let cts = CancellationTokenSource.CreateLinkedTokenSource(cloudCts.Token.LocalToken)
                 return
@@ -79,14 +79,14 @@ module Distinct =
             }
         let reducer (flow : CloudFlow<int * PersistedCloudFlow<'Key * 'T>>) : Cloud<PersistedCloudFlow<'T>> =
             cloud {
-                let combiner' (result : PersistedCloudFlow<_> []) = local { return PersistedCloudFlow.Concat result }
+                let combiner' (result : PersistedCloudFlow<_> []) = cloud0 { return PersistedCloudFlow.Concat result }
                 let! cts = Cloud.CreateCancellationTokenSource()
                 let! pkvs = flow.WithEvaluators (reducerF cts) (fun kvs -> PersistedCloudFlow.New(kvs, storageLevel = StorageLevel.Disk)) combiner'
                 return pkvs
             }
         { new CloudFlow<'T> with
             member __.DegreeOfParallelism = source.DegreeOfParallelism
-            member __.WithEvaluators<'S, 'R> (collectorF : Local<Collector<'T, 'S>>) (projection : 'S -> Local<'R>) combiner =
+            member __.WithEvaluators<'S, 'R> (collectorF : Cloud0<Collector<'T, 'S>>) (projection : 'S -> Cloud0<'R>) combiner =
                 cloud {
                     let! result = shuffling
                     let! result' = reducer (Array.ToCloudFlow result)

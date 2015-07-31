@@ -400,7 +400,7 @@ type ``CloudFileStore Tests`` (parallelismFactor : int) as self =
         let testPartitioning partitionCount =
             cloud {
                 let! partitions = cseq.GetPartitions (Array.init partitionCount (fun _ -> 4))
-                let! lines' = partitions |> Cloud.Balanced.collectLocal (fun c -> local { return! c.ToEnumerable() })
+                let! lines' = partitions |> Cloud.Balanced.collectCloud (fun c -> cloud0 { return! c.ToEnumerable() })
                 lines'.Length |> shouldEqual 1000
                 lines' |> Array.iteri check 
             } |> runRemote

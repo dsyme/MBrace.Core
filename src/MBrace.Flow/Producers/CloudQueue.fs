@@ -21,14 +21,14 @@ type internal CloudQueue =
     static member ToCloudFlow (channel : CloudQueue<'T>, degreeOfParallelism : int) : CloudFlow<'T> =
         { new CloudFlow<'T> with
             member self.DegreeOfParallelism = Some degreeOfParallelism
-            member self.WithEvaluators<'S, 'R> (collectorf : Local<Collector<'T, 'S>>) (projection : 'S -> Local<'R>) (combiner : 'R [] -> Local<'R>) =
+            member self.WithEvaluators<'S, 'R> (collectorf : Cloud0<Collector<'T, 'S>>) (projection : 'S -> Cloud0<'R>) (combiner : 'R [] -> Cloud0<'R>) =
                 cloud {
                     let! collector = collectorf 
                     let! workers = Cloud.GetAvailableWorkers() 
                     let workers = workers |> Array.sortBy (fun workerRef -> workerRef.Id)
                     let workerCount = defaultArg collector.DegreeOfParallelism workers.Length
 
-                    let createTask () = local {
+                    let createTask () = cloud0 {
                         let! ctx = Cloud.GetExecutionContext()
                         let! collector = collectorf
                         let seq = Seq.initInfinite (fun _ -> Cloud.RunSynchronously(CloudQueue.Dequeue channel, ctx.Resources, ctx.CancellationToken))

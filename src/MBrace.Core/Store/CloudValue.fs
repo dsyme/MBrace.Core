@@ -141,7 +141,7 @@ open MBrace.Core.Internals
 type CloudValue =
 
     /// Gets the default cache storage level used by the runtime.
-    static member DefaultStorageLevel = local {
+    static member DefaultStorageLevel = cloud0 {
         let! provider = Cloud.GetResource<ICloudValueProvider> ()
         return provider.DefaultStorageLevel
     }
@@ -151,7 +151,7 @@ type CloudValue =
     ///     CloudValue implementation.
     /// </summary>
     /// <param name="storageLevel">Storage level to be checked.</param>
-    static member IsSupportedStorageLevel (storageLevel : StorageLevel) : Local<bool> = local {
+    static member IsSupportedStorageLevel (storageLevel : StorageLevel) : Cloud0<bool> = cloud0 {
         let! provider = Cloud.GetResource<ICloudValueProvider> ()
         return provider.IsSupportedStorageLevel storageLevel    
     }
@@ -161,7 +161,7 @@ type CloudValue =
     /// </summary>
     /// <param name="value">Payload for CloudValue.</param>
     /// <param name="storageLevel">StorageLevel to be used for CloudValue.</param>
-    static member New<'T>(value : 'T, ?storageLevel : StorageLevel) : Local<CloudValue<'T>> = local {
+    static member New<'T>(value : 'T, ?storageLevel : StorageLevel) : Cloud0<CloudValue<'T>> = cloud0 {
         let! provider = Cloud.GetResource<ICloudValueProvider> ()
         let storageLevel = defaultArg storageLevel provider.DefaultStorageLevel
         return! provider.CreateCloudValue(value, storageLevel)
@@ -172,7 +172,7 @@ type CloudValue =
     /// </summary>
     /// <param name="values">Input set of values.</param>
     /// <param name="storageLevel">StorageLevel to be used for CloudValues.</param>
-    static member NewArray<'T>(values : seq<'T>, ?storageLevel : StorageLevel) : Local<CloudArray<'T>> = local {
+    static member NewArray<'T>(values : seq<'T>, ?storageLevel : StorageLevel) : Cloud0<CloudArray<'T>> = cloud0 {
         let! cval = CloudValue.New(Seq.toArray values, ?storageLevel = storageLevel)
         return cval :?> CloudArray<'T>
     }
@@ -183,7 +183,7 @@ type CloudValue =
     /// <param name="values">Input set of values.</param>
     /// <param name="partitionThreshold">Partition threshold in bytes.</param>
     /// <param name="storageLevel">StorageLevel to be used for CloudValues.</param>
-    static member NewArrayPartitioned<'T>(values : seq<'T>, partitionThreshold : int64, ?storageLevel : StorageLevel) : Local<CloudArray<'T> []> = local {
+    static member NewArrayPartitioned<'T>(values : seq<'T>, partitionThreshold : int64, ?storageLevel : StorageLevel) : Cloud0<CloudArray<'T> []> = cloud0 {
         let! provider = Cloud.GetResource<ICloudValueProvider> ()
         let storageLevel = defaultArg storageLevel provider.DefaultStorageLevel
         return! provider.CreateCloudArrayPartitioned(values, partitionThreshold, storageLevel)
@@ -200,7 +200,7 @@ type CloudValue =
     ///     Retrieves a CloudValue instance by provided id.
     /// </summary>
     /// <param name="id">CloudValue identifier.</param>
-    static member GetValueById(id : string) : Local<ICloudValue> = local {
+    static member GetValueById(id : string) : Cloud0<ICloudValue> = cloud0 {
         let! provider = Cloud.GetResource<ICloudValueProvider> ()
         return! provider.GetValueById(id)
     }
@@ -208,7 +208,7 @@ type CloudValue =
     /// <summary>
     ///     Fetches all existing CloudValue from underlying store.
     /// </summary>
-    static member GetAllValues() : Local<ICloudValue []> = local {
+    static member GetAllValues() : Cloud0<ICloudValue []> = cloud0 {
         let! provider = Cloud.GetResource<ICloudValueProvider> ()
         return! provider.GetAllValues()
     }
@@ -217,7 +217,7 @@ type CloudValue =
     ///     Dereferences a cloud value.
     /// </summary>
     /// <param name="value">CloudValue instance.</param>
-    static member Read(value : CloudValue<'T>) : Local<'T> = local {
+    static member Read(value : CloudValue<'T>) : Cloud0<'T> = cloud0 {
         return! value.GetValueAsync()
     }
 
@@ -225,6 +225,6 @@ type CloudValue =
     ///     Deletes the provided CloudValue from store.
     /// </summary>
     /// <param name="atom">Atom instance to be deleted.</param>
-    static member Delete (value : ICloudValue) : Local<unit> = local {
+    static member Delete (value : ICloudValue) : Cloud0<unit> = cloud0 {
         return! value.Dispose()
     }

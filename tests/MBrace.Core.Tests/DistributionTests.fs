@@ -109,7 +109,7 @@ type ``Distribution Tests`` (parallelismFactor : int, delayFactor : int) as self
         let trigger = runLocally <| CloudAtom.New 0
         Cloud.TryFinally( cloud {
             let! x,y = cloud { return 1 } <||> cloud { return invalidOp "failure" }
-            return () }, CloudAtom.Incr trigger |> Local.Ignore)
+            return () }, CloudAtom.Incr trigger |> Cloud0.Ignore)
         |> runRemote |> Choice.shouldFailwith<_, InvalidOperationException>
 
         trigger.Value |> shouldEqual 1
@@ -163,7 +163,7 @@ type ``Distribution Tests`` (parallelismFactor : int, delayFactor : int) as self
                         invalidOp "failure"
                     else
                         do! Cloud.Sleep delayFactor
-                        do! CloudAtom.Incr counter |> Local.Ignore
+                        do! CloudAtom.Incr counter |> Cloud0.Ignore
                 }
 
                 try
@@ -184,7 +184,7 @@ type ``Distribution Tests`` (parallelismFactor : int, delayFactor : int) as self
                         invalidOp "failure"
                     else
                         do! Cloud.Sleep delayFactor
-                        do! CloudAtom.Incr counter |> Local.Ignore
+                        do! CloudAtom.Incr counter |> Cloud0.Ignore
                 }
 
                 let cluster i = Array.init 10 (worker i) |> Cloud.Parallel |> Cloud.Ignore
@@ -207,7 +207,7 @@ type ``Distribution Tests`` (parallelismFactor : int, delayFactor : int) as self
                 let f i = cloud {
                     if i = 0 then cts.Cancel() 
                     do! Cloud.Sleep delayFactor
-                    do! CloudAtom.Incr counter |> Local.Ignore
+                    do! CloudAtom.Incr counter |> Cloud0.Ignore
                 }
 
                 let! _ = Array.init 10 f |> Cloud.Parallel
@@ -221,14 +221,14 @@ type ``Distribution Tests`` (parallelismFactor : int, delayFactor : int) as self
     member __.``1. Parallel : as local`` () =
         repeat(fun () ->
             // check local semantics are forced by using ref cells.
-            local {
+            cloud0 {
                 let counter = ref 0
                 let seqWorker _ = cloud {
                     do! Cloud.Sleep 10
                     Interlocked.Increment counter |> ignore
                 }
 
-                let! results = Array.init 100 seqWorker |> Cloud.Parallel |> Cloud.AsLocal
+                let! results = Array.init 100 seqWorker |> Cloud.Parallel |> Cloud.AsCloud0
                 return counter.Value
             } |> runRemote |> Choice.shouldEqual 100)
 
@@ -236,14 +236,14 @@ type ``Distribution Tests`` (parallelismFactor : int, delayFactor : int) as self
     member __.``1. Parallel : local`` () =
         repeat(fun () ->
             // check local semantics are forced by using ref cells.
-            local {
+            cloud0 {
                 let counter = ref 0
-                let seqWorker _ = local {
+                let seqWorker _ = cloud0 {
                     do! Cloud.Sleep 10
                     Interlocked.Increment counter |> ignore
                 }
 
-                let! results = Array.init 100 seqWorker |> Local.Parallel
+                let! results = Array.init 100 seqWorker |> Cloud0.Parallel
                 return counter.Value
             } |> runRemote |> Choice.shouldEqual 100)
 
@@ -255,14 +255,14 @@ type ``Distribution Tests`` (parallelismFactor : int, delayFactor : int) as self
     [<Test>]
     member __.``1. Parallel : MapReduce balanced`` () =
         // balanced, core implemented MapReduce algorithm
-        repeat(fun () -> WordCount.run 1000 Cloud.Balanced.mapReduceLocal |> runRemote |> Choice.shouldEqual 5000)
+        repeat(fun () -> WordCount.run 1000 Cloud.Balanced.mapReduceCloud |> runRemote |> Choice.shouldEqual 5000)
 
     [<Test>]
     member __.``1. Parallel : Cloud.Balanced.map`` () =
         let checker (ints : int list) =
             let expected = ints |> List.map (fun i -> i + 1) |> List.toArray
             ints
-            |> Cloud.Balanced.mapLocal (fun i -> local { return i + 1})
+            |> Cloud.Balanced.mapCloud (fun i -> cloud0 { return i + 1})
             |> runRemote
             |> Choice.shouldEqual expected
 
@@ -273,7 +273,7 @@ type ``Distribution Tests`` (parallelismFactor : int, delayFactor : int) as self
         let checker (ints : int list) =
             let expected = ints |> List.filter (fun i -> i % 5 = 0 || i % 7 = 0) |> List.toArray
             ints
-            |> Cloud.Balanced.filterLocal (fun i -> local { return i % 5 = 0 || i % 7 = 0 })
+            |> Cloud.Balanced.filterCloud (fun i -> cloud0 { return i % 5 = 0 || i % 7 = 0 })
             |> runRemote
             |> Choice.shouldEqual expected
 
@@ -284,7 +284,7 @@ type ``Distribution Tests`` (parallelismFactor : int, delayFactor : int) as self
         let checker (ints : int list) =
             let expected = ints |> List.choose (fun i -> if i % 5 = 0 || i % 7 = 0 then Some i else None) |> List.toArray
             ints
-            |> Cloud.Balanced.chooseLocal (fun i -> local { return if i % 5 = 0 || i % 7 = 0 then Some i else None })
+            |> Cloud.Balanced.chooseCloud (fun i -> cloud0 { return if i % 5 = 0 || i % 7 = 0 then Some i else None })
             |> runRemote
             |> Choice.shouldEqual expected
 
@@ -306,7 +306,7 @@ type ``Distribution Tests`` (parallelismFactor : int, delayFactor : int) as self
         let checker (ints : int []) =
             let expected = ints |> Array.collect (fun i -> [|(i,1) ; (i,2) ; (i,3)|])
             ints
-            |> Cloud.Balanced.collectLocal (fun i -> local { return [(i,1) ; (i,2) ; (i,3)] })
+            |> Cloud.Balanced.collectCloud (fun i -> cloud0 { return [(i,1) ; (i,2) ; (i,3)] })
             |> runRemote
             |> Choice.shouldEqual expected
 
@@ -339,7 +339,7 @@ type ``Distribution Tests`` (parallelismFactor : int, delayFactor : int) as self
         let checker (ints : int []) =
             let expected = ints |> Seq.groupBy id |> Seq.map (fun (k,v) -> k, Seq.sum v) |> Seq.toArray
             ints
-            |> Cloud.Balanced.foldByLocal id (fun x y -> local { return x + y }) (fun x y -> local { return x + y }) (fun _ -> local { return 0 })
+            |> Cloud.Balanced.foldByCloud id (fun x y -> cloud0 { return x + y }) (fun x y -> cloud0 { return x + y }) (fun _ -> cloud0 { return 0 })
             |> runRemote
             |> Choice.shouldEqual expected
 
@@ -532,7 +532,7 @@ type ``Distribution Tests`` (parallelismFactor : int, delayFactor : int) as self
         repeat(fun () ->
             let parallelismFactor = parallelismFactor
             // check local semantics are forced by using ref cells.
-            local {
+            cloud0 {
                 let counter = ref 0
                 let seqWorker i = cloud {
                     if i = parallelismFactor / 2 then
@@ -543,7 +543,7 @@ type ``Distribution Tests`` (parallelismFactor : int, delayFactor : int) as self
                         return None
                 }
 
-                let! result = Array.init parallelismFactor seqWorker |> Cloud.Choice |> Cloud.AsLocal
+                let! result = Array.init parallelismFactor seqWorker |> Cloud.Choice |> Cloud.AsCloud0
                 counter.Value |> shouldEqual (parallelismFactor - 1)
                 return result
             } |> runRemote |> Choice.shouldEqual (Some (parallelismFactor / 2)))
@@ -553,9 +553,9 @@ type ``Distribution Tests`` (parallelismFactor : int, delayFactor : int) as self
         repeat(fun () ->
             let parallelismFactor = parallelismFactor
             // check local semantics are forced by using ref cells.
-            local {
+            cloud0 {
                 let counter = ref 0
-                let seqWorker i = local {
+                let seqWorker i = cloud0 {
                     if i = parallelismFactor / 2 then
                         do! Cloud.Sleep 100
                         return Some i
@@ -564,7 +564,7 @@ type ``Distribution Tests`` (parallelismFactor : int, delayFactor : int) as self
                         return None
                 }
 
-                let! result = Array.init parallelismFactor seqWorker |> Local.Choice
+                let! result = Array.init parallelismFactor seqWorker |> Cloud0.Choice
                 counter.Value |> shouldEqual (parallelismFactor - 1)
                 return result
             } |> runRemote |> Choice.shouldEqual (Some (parallelismFactor / 2)))
@@ -574,7 +574,7 @@ type ``Distribution Tests`` (parallelismFactor : int, delayFactor : int) as self
         let checker (ints : int list) =
             let expected = ints |> List.filter (fun i -> i % 7 = 0 && i % 5 = 0) |> set
             ints
-            |> Cloud.Balanced.tryFindLocal (fun i -> local { return i % 7 = 0 && i % 5 = 0 })
+            |> Cloud.Balanced.tryFindCloud (fun i -> cloud0 { return i % 7 = 0 && i % 5 = 0 })
             |> runRemote
             |> Choice.shouldBe(function None -> Set.isEmpty expected | Some r -> expected.Contains r)
 
@@ -585,7 +585,7 @@ type ``Distribution Tests`` (parallelismFactor : int, delayFactor : int) as self
         let checker (ints : int list) =
             let expected = ints |> List.choose (fun i -> if i % 7 = 0 && i % 5 = 0 then Some i else None) |> set
             ints
-            |> Cloud.Balanced.tryPickLocal (fun i -> local { return if i % 7 = 0 && i % 5 = 0 then Some i else None })
+            |> Cloud.Balanced.tryPickCloud (fun i -> cloud0 { return if i % 7 = 0 && i % 5 = 0 then Some i else None })
             |> runRemote
             |> Choice.shouldBe (function None -> Set.isEmpty expected | Some r -> expected.Contains r)
 
@@ -702,7 +702,7 @@ type ``Distribution Tests`` (parallelismFactor : int, delayFactor : int) as self
                 let tworkflow = cloud {
                     let! _ = CloudAtom.Incr count
                     do! Cloud.Sleep delayFactor
-                    do! CloudAtom.Incr count |> Local.Ignore
+                    do! CloudAtom.Incr count |> Cloud0.Ignore
                 }
                 let! task = Cloud.StartAsTask(tworkflow, cancellationToken = cts.Token)
                 do! Cloud.Sleep (delayFactor / 3)
@@ -864,10 +864,10 @@ type ``Distribution Tests`` (parallelismFactor : int, delayFactor : int) as self
 
     [<Test>]
     member __.``4. Cancellation token: local semantics`` () =
-        local {
+        cloud0 {
             let! cts = 
-                let cp = Local.Parallel [ Cloud.CancellationToken ; Cloud.CancellationToken ]
-                Local.Parallel [cp ; cp]
+                let cp = Cloud0.Parallel [ Cloud.CancellationToken ; Cloud.CancellationToken ]
+                Cloud0.Parallel [cp ; cp]
 
             cts
             |> Array.concat
@@ -886,7 +886,7 @@ type ``Distribution Tests`` (parallelismFactor : int, delayFactor : int) as self
 
     [<Test>]
     member __.``4. DomainLocal`` () =
-        let domainLocal = DomainLocal.Create(local { let! w = Cloud.CurrentWorker in return Guid.NewGuid(), w })
+        let domainLocal = DomainLocal.Create(cloud0 { let! w = Cloud.CurrentWorker in return Guid.NewGuid(), w })
         cloud {
             let! results = Cloud.ParallelEverywhere domainLocal.Value 
             let! results' = Cloud.ParallelEverywhere domainLocal.Value

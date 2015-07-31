@@ -15,7 +15,7 @@ module internal BuilderImpl =
     // Implementation of expression builder combinators over Body<'T>
 
     let inline mkCloud body = new Cloud<'T>(body)
-    let inline mkLocal body = new Local<'T>(body)
+    let inline mkCloud0 body = new Cloud0<'T>(body)
 
     let inline capture (e : 'exn) = ExceptionDispatchInfo.Capture e
     let inline extract (edi : ExceptionDispatchInfo) = edi.Reify(false, false)
@@ -339,40 +339,40 @@ module Builders =
         [<CompilerMessage("While loops in distributed computation not recommended; consider using an accumulator pattern instead.", 443)>]
         member __.While(pred : unit -> bool, body : Cloud<unit>) : Cloud<unit> = mkCloud <| whileM pred body.Body
 
-    /// Local workflow expression builder
-    type LocalBuilder () =
-        let lzero : Local<unit> = mkLocal zero
-        member __.Return (t : 'T) : Local<'T> = mkLocal <| ret t
-        member __.Zero () : Local<unit> = lzero
-        member __.Delay (f : unit -> Local<'T>) : Local<'T> = mkLocal <| mkExplicitDelay f
-        member __.ReturnFrom (c : Local<'T>) : Local<'T> = c
-        member __.ReturnFrom (c : Async<'T>) : Local<'T> = mkLocal (ofAsync c)
-        member __.Combine(f : Local<unit>, g : Local<'T>) : Local<'T> = mkLocal <| combine f.Body g.Body
-        member __.Bind (f : Local<'T>, g : 'T -> Local<'S>) : Local<'S> = mkLocal <| bind f.Body g
-        member __.Bind (f : Async<'T>, g : 'T -> Local<'S>) : Local<'S> = mkLocal <| bind (ofAsync f) g
+    /// Single-machine cloud workflow expression builder
+    type Cloud0Builder () =
+        let lzero : Cloud0<unit> = mkCloud0 zero
+        member __.Return (t : 'T) : Cloud0<'T> = mkCloud0 <| ret t
+        member __.Zero () : Cloud0<unit> = lzero
+        member __.Delay (f : unit -> Cloud0<'T>) : Cloud0<'T> = mkCloud0 <| mkExplicitDelay f
+        member __.ReturnFrom (c : Cloud0<'T>) : Cloud0<'T> = c
+        member __.ReturnFrom (c : Async<'T>) : Cloud0<'T> = mkCloud0 (ofAsync c)
+        member __.Combine(f : Cloud0<unit>, g : Cloud0<'T>) : Cloud0<'T> = mkCloud0 <| combine f.Body g.Body
+        member __.Bind (f : Cloud0<'T>, g : 'T -> Cloud0<'S>) : Cloud0<'S> = mkCloud0 <| bind f.Body g
+        member __.Bind (f : Async<'T>, g : 'T -> Cloud0<'S>) : Cloud0<'S> = mkCloud0 <| bind (ofAsync f) g
 
-        member __.Using<'T, 'U, 'p when 'T :> IDisposable>(value : 'T, bindF : 'T -> Local<'U>) : Local<'U> = 
-            mkLocal <| usingIDisposable value bindF
-        member __.Using<'T, 'U when 'T :> ICloudDisposable>(value : 'T, bindF : 'T -> Local<'U>) : Local<'U> = 
-            mkLocal <| usingICloudDisposable value bindF
+        member __.Using<'T, 'U, 'p when 'T :> IDisposable>(value : 'T, bindF : 'T -> Cloud0<'U>) : Cloud0<'U> = 
+            mkCloud0 <| usingIDisposable value bindF
+        member __.Using<'T, 'U when 'T :> ICloudDisposable>(value : 'T, bindF : 'T -> Cloud0<'U>) : Cloud0<'U> = 
+            mkCloud0 <| usingICloudDisposable value bindF
 
-        member __.TryWith(f : Local<'T>, handler : exn -> Local<'T>) : Local<'T> = mkLocal <| tryWith f.Body handler
-        member __.TryFinally(f : Local<'T>, finalizer : unit -> unit) : Local<'T> = 
-            mkLocal <| tryFinally f.Body (retFunc finalizer)
+        member __.TryWith(f : Cloud0<'T>, handler : exn -> Cloud0<'T>) : Cloud0<'T> = mkCloud0 <| tryWith f.Body handler
+        member __.TryFinally(f : Cloud0<'T>, finalizer : unit -> unit) : Cloud0<'T> = 
+            mkCloud0 <| tryFinally f.Body (retFunc finalizer)
 
-        member __.For(ts : 'T [], body : 'T -> Local<unit>) : Local<unit> = mkLocal <| forArray body ts
-        member __.For(ts : 'T list, body : 'T -> Local<unit>) : Local<unit> = mkLocal <| forList body ts
-        member __.For(ts : seq<'T>, body : 'T -> Local<unit>) : Local<unit> = 
+        member __.For(ts : 'T [], body : 'T -> Cloud0<unit>) : Cloud0<unit> = mkCloud0 <| forArray body ts
+        member __.For(ts : 'T list, body : 'T -> Cloud0<unit>) : Cloud0<unit> = mkCloud0 <| forList body ts
+        member __.For(ts : seq<'T>, body : 'T -> Cloud0<unit>) : Cloud0<unit> = 
             match ts with
-            | :? ('T []) as ts -> mkLocal <| forArray body ts
-            | :? ('T list) as ts -> mkLocal <| forList body ts
-            | _ -> mkLocal <| forSeq body ts
+            | :? ('T []) as ts -> mkCloud0 <| forArray body ts
+            | :? ('T list) as ts -> mkCloud0 <| forList body ts
+            | _ -> mkCloud0 <| forSeq body ts
 
-        member __.While(pred : unit -> bool, body : Local<unit>) : Local<unit> = mkLocal <| whileM pred body.Body
+        member __.While(pred : unit -> bool, body : Cloud0<unit>) : Cloud0<unit> = mkCloud0 <| whileM pred body.Body
 
 
     /// local builder instance
-    let local = new LocalBuilder ()
+    let cloud0 = new Cloud0Builder ()
 
     /// cloud builder instance
     let cloud = new CloudBuilder ()

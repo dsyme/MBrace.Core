@@ -22,7 +22,7 @@ module Take =
     /// <returns>The resulting CloudFlow.</returns>
     let take (n : int) (flow: CloudFlow<'T>) : CloudFlow<'T> =
         let collectorF (cloudCts : ICloudCancellationTokenSource) =
-            local {
+            cloud0 {
                 let results = new List<List<'T>>()
                 let cts = CancellationTokenSource.CreateLinkedTokenSource(cloudCts.Token.LocalToken)
                 return
@@ -42,7 +42,7 @@ module Take =
             cloud {
                 let! cts = Cloud.CreateCancellationTokenSource()
                 let! flow = flow.WithEvaluators (collectorF cts) (fun value -> PersistedCloudFlow.New(value, storageLevel = StorageLevel.Disk) ) 
-                                                                 (fun results -> local { return PersistedCloudFlow.Concat results } )
+                                                                 (fun results -> cloud0 { return PersistedCloudFlow.Concat results } )
 
                 // Calculate number of partitions up to n
                 let partitions = ResizeArray<_>()
@@ -60,7 +60,7 @@ module Take =
             }
         { new CloudFlow<'T> with
               member __.DegreeOfParallelism = flow.DegreeOfParallelism
-              member __.WithEvaluators<'S, 'R>(collectorF: Local<Collector<'T, 'S>>) (projection: 'S -> Local<'R>) combiner =
+              member __.WithEvaluators<'S, 'R>(collectorF: Cloud0<Collector<'T, 'S>>) (projection: 'S -> Cloud0<'R>) combiner =
                   cloud {
                       let! flow = gather 
                       return! (flow :> CloudFlow<_>).WithEvaluators collectorF projection combiner

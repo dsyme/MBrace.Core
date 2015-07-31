@@ -20,7 +20,7 @@ module NonDeterministic =
 
     let tryFindGen (predicate : ExecutionContext -> 'T -> bool) (flow : CloudFlow<'T>) : Cloud<'T option> =
         let collectorf (cloudCts : ICloudCancellationTokenSource) =
-            local {
+            cloud0 {
                 let! ctx = Cloud.GetExecutionContext()
                 let resultRef = ref Unchecked.defaultof<'T option>
                 let cts = CancellationTokenSource.CreateLinkedTokenSource(cloudCts.Token.LocalToken)
@@ -37,12 +37,12 @@ module NonDeterministic =
 
         cloud {
             let! cts = Cloud.CreateCancellationTokenSource()
-            return! flow.WithEvaluators (collectorf cts) (fun v -> local { return v }) (fun result -> local { return Array.tryPick id result })
+            return! flow.WithEvaluators (collectorf cts) (fun v -> cloud0 { return v }) (fun result -> cloud0 { return Array.tryPick id result })
         }
 
     let tryPickGen (chooser : ExecutionContext -> 'T -> 'R option) (flow : CloudFlow<'T>) : Cloud<'R option> =
         let collectorf (cloudCts : ICloudCancellationTokenSource) =
-            local {
+            cloud0 {
                 let! ctx = Cloud.GetExecutionContext()
                 let resultRef = ref Unchecked.defaultof<'R option>
                 let cts = CancellationTokenSource.CreateLinkedTokenSource(cloudCts.Token.LocalToken)
@@ -59,5 +59,5 @@ module NonDeterministic =
 
         cloud {
             let! cts = Cloud.CreateCancellationTokenSource()
-            return! flow.WithEvaluators (collectorf cts) (fun v -> local { return v }) (fun result -> local { return Array.tryPick id result })
+            return! flow.WithEvaluators (collectorf cts) (fun v -> cloud0 { return v }) (fun result -> cloud0 { return Array.tryPick id result })
         }

@@ -99,7 +99,7 @@ type CloudQueue =
     ///     Creates a new queue instance.
     /// </summary>
     /// <param name="container">Container to queue. Defaults to process default.</param>
-    static member New<'T>(?container : string) = local {
+    static member New<'T>(?container : string) = cloud0 {
         let! config = Cloud.GetResource<CloudQueueConfiguration> ()
         let container = defaultArg container config.DefaultContainer
         return! config.QueueProvider.CreateQueue<'T> (container)
@@ -110,7 +110,7 @@ type CloudQueue =
     /// </summary>
     /// <param name="message">Message to send.</param>
     /// <param name="queue">Target queue.</param>
-    static member Enqueue<'T> (queue : CloudQueue<'T>, message : 'T) = local {
+    static member Enqueue<'T> (queue : CloudQueue<'T>, message : 'T) = cloud0 {
         return! queue.Enqueue message
     }
 
@@ -119,7 +119,7 @@ type CloudQueue =
     /// </summary>
     /// <param name="messages">Message to be enqueued.</param>
     /// <param name="queue">Target queue.</param>
-    static member EnqueueBatch<'T> (queue : CloudQueue<'T>, messages : seq<'T>) = local {
+    static member EnqueueBatch<'T> (queue : CloudQueue<'T>, messages : seq<'T>) = cloud0 {
         return! queue.EnqueueBatch messages
     }
 
@@ -128,7 +128,7 @@ type CloudQueue =
     /// </summary>
     /// <param name="queue">Source queue.</param>
     /// <param name="timeout">Timeout in milliseconds.</param>
-    static member Dequeue<'T> (queue : CloudQueue<'T>, ?timeout : int) = local {
+    static member Dequeue<'T> (queue : CloudQueue<'T>, ?timeout : int) = cloud0 {
         return! queue.Dequeue (?timeout = timeout)
     }
 
@@ -137,7 +137,7 @@ type CloudQueue =
     ///     Returns None instantly if no message is currently available.
     /// </summary>
     /// <param name="queue"></param>
-    static member TryDequeue<'T> (queue : CloudQueue<'T>) = local {
+    static member TryDequeue<'T> (queue : CloudQueue<'T>) = cloud0 {
         return! queue.TryDequeue()
     }
 
@@ -145,20 +145,20 @@ type CloudQueue =
     ///     Deletes cloud queue instance.
     /// </summary>
     /// <param name="queue">Queue to be disposed.</param>
-    static member Delete(queue : CloudQueue<'T>) : Local<unit> = 
-        local { return! queue.Dispose() }
+    static member Delete(queue : CloudQueue<'T>) : Cloud0<unit> = 
+        cloud0 { return! queue.Dispose() }
 
     /// <summary>
     ///     Deletes container and all its contained queues.
     /// </summary>
     /// <param name="container"></param>
-    static member DeleteContainer (container : string) = local {
+    static member DeleteContainer (container : string) = cloud0 {
         let! config = Cloud.GetResource<CloudQueueConfiguration> ()
         return! config.QueueProvider.DisposeContainer container
     }
 
     /// Generates a unique container name.
-    static member CreateContainerName() = local {
+    static member CreateContainerName() = cloud0 {
         let! config = Cloud.GetResource<CloudQueueConfiguration> ()
         return config.QueueProvider.CreateUniqueContainerName()
     }

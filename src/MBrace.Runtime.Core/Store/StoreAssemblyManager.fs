@@ -51,7 +51,7 @@ type private StoreAssemblyUploader(config : CloudFileStoreConfiguration, imem : 
     let sizeOfFile (path:string) = FileInfo(path).Length |> getHumanReadableByteSize
     let append (fileName : string) = config.FileStore.Combine(config.DefaultDirectory, fileName)
 
-    let tryGetCurrentMetadata (id : AssemblyId) = local {
+    let tryGetCurrentMetadata (id : AssemblyId) = cloud0 {
         try 
             let! c = PersistedValue.OfCloudFile<VagabondMetadata>(getStoreMetadataPath append id)
             let! md = c.GetValueAsync()
@@ -60,7 +60,7 @@ type private StoreAssemblyUploader(config : CloudFileStoreConfiguration, imem : 
         with :? FileNotFoundException -> return None
     }
 
-    let getAssemblyLoadInfo (id : AssemblyId) = local {
+    let getAssemblyLoadInfo (id : AssemblyId) = cloud0 {
         let! assemblyExists = CloudFile.Exists (getStoreAssemblyPath append id)
         if not assemblyExists then return NotLoaded id
         else
@@ -72,7 +72,7 @@ type private StoreAssemblyUploader(config : CloudFileStoreConfiguration, imem : 
     }
 
     /// upload assembly to blob store
-    let uploadAssembly (va : VagabondAssembly) = local {
+    let uploadAssembly (va : VagabondAssembly) = cloud0 {
         let assemblyStorePath = getStoreAssemblyPath append va.Id
         let! assemblyExists = CloudFile.Exists assemblyStorePath
 
@@ -124,7 +124,7 @@ type private StoreAssemblyUploader(config : CloudFileStoreConfiguration, imem : 
             |> Seq.map (fun (hash, dd) -> dd, hash, files.[dd.Id])
             |> Seq.toArray
 
-        let uploadDataFile (dd : DataDependencyInfo, hash : HashResult, localPath : string) = local {
+        let uploadDataFile (dd : DataDependencyInfo, hash : HashResult, localPath : string) = cloud0 {
             let blobPath = getStoreDataPath prefixDataByAssemblyId append va.Id hash
             let! dataExists = CloudFile.Exists blobPath
             if not dataExists then
@@ -136,7 +136,7 @@ type private StoreAssemblyUploader(config : CloudFileStoreConfiguration, imem : 
         // only print metadata message if updating data dependencies
         if assemblyExists then logger.Logf LogLevel.Info "Updating metadata for '%s'" va.FullName
 
-        do! dataFiles |> Seq.map uploadDataFile |> Local.Parallel |> Local.Ignore
+        do! dataFiles |> Seq.map uploadDataFile |> Cloud0.Parallel |> Cloud0.Ignore
 
         // upload metadata record; TODO: use CloudAtom for synchronization?
         let! _ = PersistedValue.New<VagabondMetadata>(va.Metadata, path = getStoreMetadataPath append va.Id)
@@ -145,11 +145,11 @@ type private StoreAssemblyUploader(config : CloudFileStoreConfiguration, imem : 
 
     interface IRemoteAssemblyReceiver with
         member x.GetLoadedAssemblyInfo(dependencies: AssemblyId []): Async<AssemblyLoadInfo []> = async {
-            return! dependencies |> Seq.map getAssemblyLoadInfo |> Local.Parallel |> imem.RunAsync
+            return! dependencies |> Seq.map getAssemblyLoadInfo |> Cloud0.Parallel |> imem.RunAsync
         }
         
         member x.PushAssemblies(assemblies: VagabondAssembly []): Async<AssemblyLoadInfo []> =  async {
-            return! assemblies |> Seq.map uploadAssembly |> Local.Parallel |> imem.RunAsync
+            return! assemblies |> Seq.map uploadAssembly |> Cloud0.Parallel |> imem.RunAsync
         }
 
 
@@ -175,7 +175,7 @@ type private StoreAssemblyDownloader(config : CloudFileStoreConfiguration, imem 
         }
         
         member x.ReadMetadata(id: AssemblyId): Async<VagabondMetadata> = 
-            local {
+            cloud0 {
                 let! c = PersistedValue.OfCloudFile<VagabondMetadata>(getStoreMetadataPath append id)
                 return! c.GetValueAsync()
             } |> imem.RunAsync

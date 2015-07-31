@@ -95,7 +95,7 @@ type CloudAtom =
     ///     Creates a new cloud atom instance with given value.
     /// </summary>
     /// <param name="initial">Initial value.</param>
-    static member New<'T>(initial : 'T, ?container : string) : Local<CloudAtom<'T>> = local {
+    static member New<'T>(initial : 'T, ?container : string) : Cloud0<CloudAtom<'T>> = cloud0 {
         let! config = Cloud.GetResource<CloudAtomConfiguration> ()
         let container = defaultArg container config.DefaultContainer
         return! config.AtomProvider.CreateAtom(container, initial)
@@ -105,7 +105,7 @@ type CloudAtom =
     ///     Dereferences a cloud atom.
     /// </summary>
     /// <param name="atom">Atom instance.</param>
-    static member Read(atom : CloudAtom<'T>) : Local<'T> = local {
+    static member Read(atom : CloudAtom<'T>) : Cloud0<'T> = cloud0 {
         return! atom.GetValueAsync()
     }
 
@@ -115,7 +115,7 @@ type CloudAtom =
     /// <param name="updater">value updating function.</param>
     /// <param name="atom">Atom instance to be updated.</param>
     /// <param name="maxRetries">Maximum number of retries before giving up. Defaults to infinite.</param>
-    static member Update (atom : CloudAtom<'T>, updateF : 'T -> 'T, ?maxRetries : int)  : Local<unit> = local {
+    static member Update (atom : CloudAtom<'T>, updateF : 'T -> 'T, ?maxRetries : int)  : Cloud0<unit> = cloud0 {
         return! atom.Transact((fun t -> (), updateF t), ?maxRetries = maxRetries)
     }
 
@@ -124,7 +124,7 @@ type CloudAtom =
     /// </summary>
     /// <param name="value">Value to be set.</param>
     /// <param name="atom">Atom instance to be updated.</param>
-    static member Force (atom : CloudAtom<'T>, value : 'T) : Local<unit> = local {
+    static member Force (atom : CloudAtom<'T>, value : 'T) : Cloud0<unit> = cloud0 {
         return! atom.Force value
     }
 
@@ -134,7 +134,7 @@ type CloudAtom =
     /// <param name="atom">Input atom.</param>
     /// <param name="transactF">Transaction function.</param>
     /// <param name="maxRetries">Maximum number of retries before giving up. Defaults to infinite.</param>
-    static member Transact (atom : CloudAtom<'T>, transactF : 'T -> 'R * 'T, ?maxRetries : int) : Local<'R> = local {
+    static member Transact (atom : CloudAtom<'T>, transactF : 'T -> 'R * 'T, ?maxRetries : int) : Cloud0<'R> = cloud0 {
         return! atom.Transact(transactF, ?maxRetries = maxRetries)
     }
 
@@ -142,7 +142,7 @@ type CloudAtom =
     ///     Deletes the provided atom instance from store.
     /// </summary>
     /// <param name="atom">Atom instance to be deleted.</param>
-    static member Delete (atom : CloudAtom<'T>) : Local<unit> = local {
+    static member Delete (atom : CloudAtom<'T>) : Cloud0<unit> = cloud0 {
         return! atom.Dispose()
     }
 
@@ -150,13 +150,13 @@ type CloudAtom =
     ///     Deletes container and all its contained atoms.
     /// </summary>
     /// <param name="container"></param>
-    static member DeleteContainer (container : string) : Local<unit> = local {
+    static member DeleteContainer (container : string) : Cloud0<unit> = cloud0 {
         let! config = Cloud.GetResource<CloudAtomConfiguration> ()
         return! config.AtomProvider.DisposeContainer container
     }
 
     /// Generates a unique container name.
-    static member CreateContainerName() = local {
+    static member CreateContainerName() = cloud0 {
         let! config = Cloud.GetResource<CloudAtomConfiguration> ()
         return config.AtomProvider.CreateUniqueContainerName()
     }
@@ -165,7 +165,7 @@ type CloudAtom =
     ///     Checks if value is supported by current table store.
     /// </summary>
     /// <param name="value">Value to be checked.</param>
-    static member IsSupportedValue(value : 'T) = local {
+    static member IsSupportedValue(value : 'T) = cloud0 {
         let! config = Cloud.TryGetResource<CloudAtomConfiguration> ()
         return
             match config with
@@ -177,7 +177,7 @@ type CloudAtom =
     ///     Increments a cloud counter by one.
     /// </summary>
     /// <param name="atom">Input atom.</param>
-    static member inline Incr (atom : CloudAtom<'T>) : Local<'T> = local {
+    static member inline Incr (atom : CloudAtom<'T>) : Cloud0<'T> = cloud0 {
         return! atom.Transact (fun i -> let i' = i + LanguagePrimitives.GenericOne in i',i')
     }
 
@@ -185,6 +185,6 @@ type CloudAtom =
     ///     Decrements a cloud counter by one.
     /// </summary>
     /// <param name="atom">Input atom.</param>
-    static member inline Decr (atom : CloudAtom<'T>) : Local<'T> = local {
+    static member inline Decr (atom : CloudAtom<'T>) : Cloud0<'T> = cloud0 {
         return! atom.Transact (fun i -> let i' = i - LanguagePrimitives.GenericOne in i',i')
     }

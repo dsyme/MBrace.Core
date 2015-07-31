@@ -50,7 +50,7 @@ type ``CloudDictionary Tests`` (parallelismFactor : int) as self =
         let parallelismFactor = parallelismFactor
         cloud {
             let! dict = CloudDictionary.New<int> ()
-            let add i = local { return! dict.Add(string i, i) }
+            let add i = cloud0 { return! dict.Add(string i, i) }
 
             do! Cloud.Parallel [ for i in 1 .. parallelismFactor -> add i ] |> Cloud.Ignore
 
@@ -62,7 +62,7 @@ type ``CloudDictionary Tests`` (parallelismFactor : int) as self =
         let parallelismFactor = parallelismFactor
         cloud {
             let! dict = CloudDictionary.New<int> ()
-            let incr i = local {
+            let incr i = cloud0 {
                 let! _ = CloudDictionary.AddOrUpdate "key" (function None -> i | Some c -> c + i) dict
                 return ()
             }

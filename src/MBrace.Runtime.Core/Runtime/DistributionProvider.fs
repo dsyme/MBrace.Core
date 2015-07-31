@@ -43,8 +43,8 @@ type DistributionProvider private (currentWorker : WorkerRef, runtime : IRuntime
         member __.WithForcedLocalParallelismSetting (setting : bool) = 
             new DistributionProvider(currentWorker, runtime, currentJob, faultPolicy, logger, setting) :> IParallelismProvider
 
-        member __.ScheduleLocalParallel (computations : seq<Local<'T>>) = ThreadPool.Parallel(mkNestedCts false, MemoryEmulation.Shared, computations)
-        member __.ScheduleLocalChoice (computations : seq<Local<'T option>>) = ThreadPool.Choice(mkNestedCts false, MemoryEmulation.Shared, computations)
+        member __.ScheduleLocalParallel (computations : seq<Cloud0<'T>>) = ThreadPool.Parallel(mkNestedCts false, MemoryEmulation.Shared, computations)
+        member __.ScheduleLocalChoice (computations : seq<Cloud0<'T option>>) = ThreadPool.Choice(mkNestedCts false, MemoryEmulation.Shared, computations)
 
         member __.ScheduleParallel (computations : seq<#Cloud<'T> * IWorkerRef option>) = cloud {
             if isForcedLocalParallelism then

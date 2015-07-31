@@ -50,7 +50,7 @@ type ``CloudAtom Tests`` (parallelismFactor : int) as self =
             cloud {
                 let! a = CloudAtom.New 0
                 for i in [1 .. nSequential] do
-                    do! CloudAtom.Incr a |> Local.Ignore
+                    do! CloudAtom.Incr a |> Cloud0.Ignore
 
                 return a
             } |> runRemote
@@ -67,7 +67,7 @@ type ``CloudAtom Tests`` (parallelismFactor : int) as self =
                     let! a = CloudAtom.New 0
                     let worker _ = cloud {
                         for _ in [1 .. nSequential] do
-                            do! CloudAtom.Incr a |> Local.Ignore
+                            do! CloudAtom.Incr a |> Cloud0.Ignore
                     }
                     do! Seq.init parallelismFactor worker |> Cloud.Parallel |> Cloud.Ignore
                     return a

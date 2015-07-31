@@ -25,7 +25,7 @@ type CloudFlowExtensions() =
     /// <param name="f">A locally executing cloud function to transform items from the input CloudFlow.</param>
     /// <returns>The result CloudFlow.</returns>
     [<System.Runtime.CompilerServices.Extension>]
-    static member inline mapLocal (this : CloudFlow<'T>, f : 'T -> Local<'R>) : CloudFlow<'R> = CloudFlow.mapLocal f this
+    static member inline mapCloud (this : CloudFlow<'T>, f : 'T -> Cloud0<'R>) : CloudFlow<'R> = CloudFlow.mapCloud f this
 
     /// <summary>Transforms each element of the input CloudFlow to a new sequence and flattens its elements.</summary>
     /// <param name="this">The input CloudFlow.</param>
@@ -39,7 +39,7 @@ type CloudFlowExtensions() =
     /// <param name="f">A locally executing cloud function to transform items from the input CloudFlow.</param>
     /// <returns>The result CloudFlow.</returns>
     [<System.Runtime.CompilerServices.Extension>]
-    static member inline collectLocal (this : CloudFlow<'T>, f : 'T -> Local<#seq<'R>>) : CloudFlow<'R> = CloudFlow.collectLocal f this
+    static member inline collectCloud (this : CloudFlow<'T>, f : 'T -> Cloud0<#seq<'R>>) : CloudFlow<'R> = CloudFlow.collectCloud f this
 
     /// <summary>Filters the elements of the input CloudFlow.</summary>
     /// <param name="this">The input CloudFlow.</param>
@@ -53,7 +53,7 @@ type CloudFlowExtensions() =
     /// <param name="predicate">A locally executing cloud function to test each source element for a condition.</param>
     /// <returns>The result CloudFlow.</returns>
     [<System.Runtime.CompilerServices.Extension>]
-    static member inline filterLocal (this : CloudFlow<'T>, predicate : 'T -> Local<bool>) : CloudFlow<'T> = CloudFlow.filterLocal predicate this
+    static member inline filterCloud (this : CloudFlow<'T>, predicate : 'T -> Cloud0<bool>) : CloudFlow<'T> = CloudFlow.filterCloud predicate this
 
     /// <summary>Returns a cloud flow with a new degree of parallelism.</summary>
     /// <param name="this">The input cloud flow.</param>
@@ -69,11 +69,11 @@ type CloudFlowExtensions() =
     /// <param name="state">A function that produces the initial state.</param>
     /// <returns>The final result.</returns>
     [<System.Runtime.CompilerServices.Extension>]
-    static member inline foldLocal (this : CloudFlow<'T>,
-                                    folder : 'State -> 'T -> Local<'State>,
-                                    combiner : 'State -> 'State -> Local<'State>,
-                                    state : unit -> Local<'State>) : Cloud<'State> =
-        CloudFlow.foldLocal folder combiner state this
+    static member inline foldCloud (this : CloudFlow<'T>,
+                                    folder : 'State -> 'T -> Cloud0<'State>,
+                                    combiner : 'State -> 'State -> Cloud0<'State>,
+                                    state : unit -> Cloud0<'State>) : Cloud<'State> =
+        CloudFlow.foldCloud folder combiner state this
 
     /// <summary>Applies a function to each element of the CloudFlow, threading an accumulator argument through the computation. If the input function is f and the elements are i0...iN, then this function computes f (... (f s i0)...) iN.</summary>
     /// <param name="this">The input CloudFlow.</param>
@@ -92,12 +92,12 @@ type CloudFlowExtensions() =
     /// <param name="state">A locally executing cloud function that produces the initial state.</param>
     /// <returns>The final result.</returns>
     [<System.Runtime.CompilerServices.Extension>]
-    static member inline foldByLocal (this : CloudFlow<'T>,
-                                      projection : 'T -> Local<'Key>,
-                                      folder : 'State -> 'T -> Local<'State>,
-                                      combiner : 'State -> 'State -> Local<'State>,
-                                      state : unit -> Local<'State>)  : CloudFlow<'Key * 'State> =
-        CloudFlow.foldByLocal projection folder combiner state this
+    static member inline foldByCloud (this : CloudFlow<'T>,
+                                      projection : 'T -> Cloud0<'Key>,
+                                      folder : 'State -> 'T -> Cloud0<'State>,
+                                      combiner : 'State -> 'State -> Cloud0<'State>,
+                                      state : unit -> Cloud0<'State>)  : CloudFlow<'Key * 'State> =
+        CloudFlow.foldByCloud projection folder combiner state this
 
     /// <summary>Applies a key-generating function to each element of a CloudFlow and return a CloudFlow yielding unique keys and the result of the threading an accumulator.</summary>
     /// <param name="this">The input CloudFlow.</param>
@@ -128,7 +128,7 @@ type CloudFlowExtensions() =
     /// <param name="this">The input CloudFlow.</param>
     /// <param name="projection">A function that maps items from the input CloudFlow to keys.</param>
     [<System.Runtime.CompilerServices.Extension>]
-    static member inline countByLocal (this : CloudFlow<'T>, projection : 'T -> Local<'Key>) : CloudFlow<'Key * int64> = CloudFlow.countByLocal projection this
+    static member inline countByCloud (this : CloudFlow<'T>, projection : 'T -> Cloud0<'Key>) : CloudFlow<'Key * int64> = CloudFlow.countByCloud projection this
 
     /// <summary>Runs the action on each element. The actions are not necessarily performed in order.</summary>
     /// <param name="this">The input CloudFlow.</param>
@@ -140,7 +140,7 @@ type CloudFlowExtensions() =
     /// <param name="this">The input CloudFlow.</param>
     /// <returns>Nothing.</returns>
     [<System.Runtime.CompilerServices.Extension>]
-    static member inline iterLocal (this : CloudFlow<'T>, action: 'T -> Local<unit>) : Cloud<unit> = CloudFlow.iterLocal action this
+    static member inline iterCloud (this : CloudFlow<'T>, action: 'T -> Cloud0<unit>) : Cloud<unit> = CloudFlow.iterCloud action this
 
     /// <summary>Returns the sum of the elements.</summary>
     /// <param name="this">The input CloudFlow.</param>
@@ -164,10 +164,10 @@ type CloudFlowExtensions() =
     /// <param name="this">The input CloudFlow.</param>
     /// <returns>The sum of the keys.</returns>
     [<System.Runtime.CompilerServices.Extension>]
-    static member inline sumByLocal (this : CloudFlow<'T>, f : 'T -> Local< ^S >) : Cloud< ^S >
+    static member inline sumByCloud (this : CloudFlow<'T>, f : 'T -> Cloud0< ^S >) : Cloud< ^S >
         when ^S : (static member ( + ) : ^S * ^S -> ^S)
         and  ^S : (static member Zero : ^S) =
-            CloudFlow.sumByLocal f this
+            CloudFlow.sumByCloud f this
 
 
     /// <summary>Returns the total number of elements of the CloudFlow.</summary>
@@ -224,7 +224,7 @@ type CloudFlowExtensions() =
     /// <param name="takeCount">The number of elements to return.</param>
     /// <returns>The result CloudFlow.</returns>
     [<System.Runtime.CompilerServices.Extension>]
-    static member inline sortByLocal (this : CloudFlow<'T>, projection : 'T -> Local<'Key>, takeCount : int) : CloudFlow<'T> = CloudFlow.sortByLocal projection takeCount this
+    static member inline sortByCloud (this : CloudFlow<'T>, projection : 'T -> Cloud0<'Key>, takeCount : int) : CloudFlow<'T> = CloudFlow.sortByCloud projection takeCount this
 
     /// <summary>Applies a key-generating locally executing cloud function to each element of the input CloudFlow and yields the CloudFlow of the given length, ordered by keys.</summary>
     /// <param name="this">The input CloudFlow.</param>
@@ -232,7 +232,7 @@ type CloudFlowExtensions() =
     /// <param name="takeCount">The number of elements to return.</param>
     /// <returns>The result CloudFlow.</returns>
     [<System.Runtime.CompilerServices.Extension>]
-    static member inline sortByUsingLocal (this : CloudFlow<'T>, projection : 'T -> Local<'Key>, comparer : IComparer<'Key>, takeCount : int) : CloudFlow<'T> = CloudFlow.sortByUsingLocal projection comparer takeCount this
+    static member inline sortByUsingCloud (this : CloudFlow<'T>, projection : 'T -> Cloud0<'Key>, comparer : IComparer<'Key>, takeCount : int) : CloudFlow<'T> = CloudFlow.sortByUsingCloud projection comparer takeCount this
 
     /// <summary>Applies a key-generating locally executing cloud function to each element of the input CloudFlow and yields the CloudFlow of the given length, ordered by descending keys.</summary>
     /// <param name="this">The input CloudFlow.</param>
@@ -240,7 +240,7 @@ type CloudFlowExtensions() =
     /// <param name="takeCount">The number of elements to return.</param>
     /// <returns>The result CloudFlow.</returns>
     [<System.Runtime.CompilerServices.Extension>]
-    static member inline sortByDescendingLocal (this : CloudFlow<'T>, projection : 'T -> Local<'Key>, takeCount : int) : CloudFlow<'T> = CloudFlow.sortByDescendingLocal projection takeCount this
+    static member inline sortByDescendingCloud (this : CloudFlow<'T>, projection : 'T -> Cloud0<'Key>, takeCount : int) : CloudFlow<'T> = CloudFlow.sortByDescendingCloud projection takeCount this
 
     /// <summary>Returns the first element for which the given function returns true. Returns None if no such element exists.</summary>
     /// <param name="this">The input cloud flow.</param>
@@ -254,7 +254,7 @@ type CloudFlowExtensions() =
     /// <param name="predicate">A function to test each source element for a condition.</param>
     /// <returns>The first element for which the predicate returns true, or None if every element evaluates to false.</returns>
     [<System.Runtime.CompilerServices.Extension>]
-    static member inline tryFindLocal (this : CloudFlow<'T>, predicate : 'T -> Local<bool>) : Cloud<'T option> = CloudFlow.tryFindLocal predicate this
+    static member inline tryFindCloud (this : CloudFlow<'T>, predicate : 'T -> Cloud0<bool>) : Cloud<'T option> = CloudFlow.tryFindCloud predicate this
 
     /// <summary>Returns the first element for which the given function returns true. Raises KeyNotFoundException if no such element exists.</summary>
     /// <param name="this">The input cloud flow.</param>
@@ -270,7 +270,7 @@ type CloudFlowExtensions() =
     /// <returns>The first element for which the predicate returns true.</returns>
     /// <exception cref="System.KeyNotFoundException">Thrown if the predicate evaluates to false for all the elements of the cloud flow.</exception>
     [<System.Runtime.CompilerServices.Extension>]
-    static member inline findLocal (this : CloudFlow<'T>, predicate : 'T -> Local<bool>) : Cloud<'T> = CloudFlow.findLocal predicate this
+    static member inline findCloud (this : CloudFlow<'T>, predicate : 'T -> Cloud0<bool>) : Cloud<'T> = CloudFlow.findCloud predicate this
 
     /// <summary>Applies the given function to successive elements, returning the first result where the function returns a Some value.</summary>
     /// <param name="this">The input cloud flow.</param>
@@ -284,7 +284,7 @@ type CloudFlowExtensions() =
     /// <param name="chooser">A locally executing cloud function that transforms items into options.</param>
     /// <returns>The first element for which the chooser returns Some, or None if every element evaluates to None.</returns>
     [<System.Runtime.CompilerServices.Extension>]
-    static member inline tryPickLocal (this : CloudFlow<'T>, chooser : 'T -> Local<'R option>) : Cloud<'R option> = CloudFlow.tryPickLocal chooser this
+    static member inline tryPickCloud (this : CloudFlow<'T>, chooser : 'T -> Cloud0<'R option>) : Cloud<'R option> = CloudFlow.tryPickCloud chooser this
 
     /// <summary>Applies the given function to successive elements, returning the first result where the function returns a Some value.
     /// Raises KeyNotFoundException when every item of the cloud flow evaluates to None when the given function is applied.</summary>
@@ -302,7 +302,7 @@ type CloudFlowExtensions() =
     /// <returns>The first element for which the chooser returns Some, or raises KeyNotFoundException if every element evaluates to None.</returns>
     /// <exception cref="System.KeyNotFoundException">Thrown if every item of the cloud flow evaluates to None when the given function is applied.</exception>
     [<System.Runtime.CompilerServices.Extension>]
-    static member inline pickLocal (this : CloudFlow<'T>, chooser : 'T -> Local<'R option>) : Cloud<'R> = CloudFlow.pickLocal chooser this
+    static member inline pickCloud (this : CloudFlow<'T>, chooser : 'T -> Cloud0<'R option>) : Cloud<'R> = CloudFlow.pickCloud chooser this
 
     /// <summary>Tests if any element of the flow satisfies the given predicate.</summary>
     /// <param name="this">The input cloud flow.</param>
@@ -316,7 +316,7 @@ type CloudFlowExtensions() =
     /// <param name="predicate">A locally executing cloud function to test each source element for a condition.</param>
     /// <returns>true if any element satisfies the predicate. Otherwise, returns false.</returns>
     [<System.Runtime.CompilerServices.Extension>]
-    static member inline existsLocal (this : CloudFlow<'T>, predicate : 'T -> Local<bool>) : Cloud<bool> = CloudFlow.existsLocal predicate this
+    static member inline existsCloud (this : CloudFlow<'T>, predicate : 'T -> Cloud0<bool>) : Cloud<bool> = CloudFlow.existsCloud predicate this
 
     /// <summary>Tests if all elements of the parallel flow satisfy the given predicate.</summary>
     /// <param name="this">The input cloud flow.</param>
@@ -330,7 +330,7 @@ type CloudFlowExtensions() =
     /// <param name="predicate">A function to test each source element for a condition.</param>
     /// <returns>true if all of the elements satisfies the predicate. Otherwise, returns false.</returns>
     [<System.Runtime.CompilerServices.Extension>]
-    static member inline forallLocal (this : CloudFlow<'T>, predicate : 'T -> Local<bool>) : Cloud<bool> = CloudFlow.forallLocal predicate this
+    static member inline forallCloud (this : CloudFlow<'T>, predicate : 'T -> Cloud0<bool>) : Cloud<bool> = CloudFlow.forallCloud predicate this
 
     /// <summary> Returns the elements of a CloudFlow up to a specified count. </summary>
     /// <param name="this">The input CloudFlow.</param>

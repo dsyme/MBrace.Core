@@ -95,13 +95,13 @@ type CloudDictionary =
     ///     in current execution context.
     /// </summary>
     /// <param name="value">Value to be verified.</param>
-    static member IsSupportedValue(value : 'T) = local {
+    static member IsSupportedValue(value : 'T) = cloud0 {
         let! config = Cloud.GetResource<ICloudDictionaryProvider>()
         return config.IsSupportedValue value
     }
 
     /// Creates a new CloudDictionary instance.
-    static member New<'T>() = local {
+    static member New<'T>() = cloud0 {
         let! provider = Cloud.GetResource<ICloudDictionaryProvider>()
         return! provider.Create<'T> ()
     }
@@ -111,7 +111,7 @@ type CloudDictionary =
     /// </summary>
     /// <param name="key">Key to be checked.</param>
     /// <param name="dictionary">Input dictionary.</param>
-    static member ContainsKey (key : string) (dictionary : CloudDictionary<'T>) = local {
+    static member ContainsKey (key : string) (dictionary : CloudDictionary<'T>) = cloud0 {
         return! dictionary.ContainsKey key
     }
 
@@ -121,7 +121,7 @@ type CloudDictionary =
     /// <param name="key">Key to be added.</param>
     /// <param name="value">Value to be added.</param>
     /// <param name="dictionary">Dictionary to be updated.</param>
-    static member TryAdd (key : string) (value : 'T) (dictionary : CloudDictionary<'T>) = local {
+    static member TryAdd (key : string) (value : 'T) (dictionary : CloudDictionary<'T>) = cloud0 {
         return! dictionary.TryAdd(key, value)
     }
 
@@ -131,7 +131,7 @@ type CloudDictionary =
     /// <param name="key">Key to be added.</param>
     /// <param name="value">Value to be added.</param>
     /// <param name="dictionary">Dictionary to be updated.</param>
-    static member Add (key : string) (value : 'T) (dictionary : CloudDictionary<'T>) = local {
+    static member Add (key : string) (value : 'T) (dictionary : CloudDictionary<'T>) = cloud0 {
         return! dictionary.Add(key, value)
     }
 
@@ -142,7 +142,7 @@ type CloudDictionary =
     /// <param name="key">Key to entry.</param>
     /// <param name="updater">Updater function.</param>
     /// <param name="dictionary">Dictionary to be updated.</param>
-    static member AddOrUpdate (key : string) (updater : 'T option -> 'T) (dictionary : CloudDictionary<'T>) = local {
+    static member AddOrUpdate (key : string) (updater : 'T option -> 'T) (dictionary : CloudDictionary<'T>) = cloud0 {
         let transacter (curr : 'T option) = let t = updater curr in t, t
         return! dictionary.Transact(key, transacter)
     }
@@ -154,7 +154,7 @@ type CloudDictionary =
     /// <param name="key">Key to entry.</param>
     /// <param name="newValue">Value to be inserted in case of missing entry.</param>
     /// <param name="updater">Entry updater function.</param>
-    static member Update (key : string) (updater : 'T -> 'T) (dictionary : CloudDictionary<'T>) = local {
+    static member Update (key : string) (updater : 'T -> 'T) (dictionary : CloudDictionary<'T>) = cloud0 {
         let transacter (curr : 'T option) =
             match curr with
             | None -> invalidOp <| sprintf "No value of key '%s' was found in dictionary." key
@@ -168,7 +168,7 @@ type CloudDictionary =
     /// </summary>
     /// <param name="key">Key to entry.</param>
     /// <param name="dictionary">Dictionary to be accessed.</param>
-    static member TryFind (key : string) (dictionary : CloudDictionary<'T>) : Local<'T option> = local {
+    static member TryFind (key : string) (dictionary : CloudDictionary<'T>) : Cloud0<'T option> = cloud0 {
         return! dictionary.TryFind key
     }
 
@@ -177,7 +177,7 @@ type CloudDictionary =
     /// </summary>
     /// <param name="key">Key to be removed.</param>
     /// <param name="dictionary">Dictionary to be updated.</param>
-    static member Remove (key : string) (dictionary : CloudDictionary<'T>) = local {
+    static member Remove (key : string) (dictionary : CloudDictionary<'T>) = cloud0 {
         return! dictionary.Remove(key)
     }
 
@@ -187,7 +187,7 @@ type CloudDictionary =
     /// <param name="transacter">Transaction funtion.</param>
     /// <param name="key">Key to perform transaction on.</param>
     /// <param name="dictionary">Input dictionary.</param>
-    static member Transact (transacter : 'T -> 'R * 'T) (key : string) (dictionary : CloudDictionary<'T>) = local {
+    static member Transact (transacter : 'T -> 'R * 'T) (key : string) (dictionary : CloudDictionary<'T>) = cloud0 {
         let transacter (curr : 'T option) =
             match curr with
             | None -> invalidOp <| sprintf "No value of key '%s' was found in dictionary." key

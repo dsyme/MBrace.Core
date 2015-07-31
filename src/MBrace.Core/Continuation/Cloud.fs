@@ -29,9 +29,13 @@ type Cloud<'T> =
 
 /// Representation of an in-memory computation, which, when run 
 /// will produce a value of type 'T, or raise an exception.
+#if DEBUG
 [<Sealed; DataContract>]
 type Local<'T> internal (body : Body<'T>) = 
     inherit Cloud<'T>(body)
+#else
+type Cloud0<'T> = Cloud<'T>
+#endif
 
 /// Denotes handle to a distributable resource that can be disposed of.
 type ICloudDisposable =

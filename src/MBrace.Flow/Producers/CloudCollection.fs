@@ -24,18 +24,18 @@ type internal CloudCollection private () =
     static member ToCloudFlow (collection : ICloudCollection<'T>, ?weight : IWorkerRef -> int, ?sizeThresholdPerWorker:unit -> int64) : CloudFlow<'T> =
         { new CloudFlow<'T> with
             member self.DegreeOfParallelism = None
-            member self.WithEvaluators<'S, 'R> (collectorf : Local<Collector<'T, 'S>>) (projection : 'S -> Local<'R>) (combiner : 'R [] -> Local<'R>) = cloud {
+            member self.WithEvaluators<'S, 'R> (collectorf : Cloud0<Collector<'T, 'S>>) (projection : 'S -> Cloud0<'R>) (combiner : 'R [] -> Cloud0<'R>) = cloud {
                 // Performs flow reduction on given input partition in a single MBrace job
-                let reducePartitionsInSingleJob (partitions : ICloudCollection<'T> []) = local {
+                let reducePartitionsInSingleJob (partitions : ICloudCollection<'T> []) = cloud0 {
                     // further partition according to collection size threshold, if so specified.
-                    let! partitionSlices = local {
+                    let! partitionSlices = cloud0 {
                         match sizeThresholdPerWorker with
                         | None -> return [| partitions |]
                         | Some f -> return! partitions |> Partition.partitionBySize (fun p -> p.GetSize()) (f ())
                     }
 
                     // compute a single partition
-                    let computePartitionSlice (slice : ICloudCollection<'T> []) = local {
+                    let computePartitionSlice (slice : ICloudCollection<'T> []) = cloud0 {
                         let! collector = collectorf
                         let! seqs = slice |> Seq.map (fun p -> p.ToEnumerable()) |> Async.Parallel
                         let pStream = seqs |> ParStream.ofArray |> ParStream.collect Stream.ofSeq
@@ -44,7 +44,7 @@ type internal CloudCollection private () =
                     }
 
                     // sequentially compute partitions
-                    let! results = Local.Sequential.map computePartitionSlice partitionSlices
+                    let! results = Cloud0.Sequential.map computePartitionSlice partitionSlices
                     return! combiner results
                 }
                 

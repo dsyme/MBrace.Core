@@ -27,7 +27,7 @@ module Fold =
                 (combiner : ExecutionContext -> 'State -> 'State -> 'State)
                 (state : ExecutionContext -> 'State) (flow : CloudFlow<'T>) : Cloud<'State> =
 
-        let collectorf (cloudCts : ICloudCancellationTokenSource) = local {
+        let collectorf (cloudCts : ICloudCancellationTokenSource) = cloud0 {
             let results = new List<'State ref>()
             let! ctx = Cloud.GetExecutionContext()
             let cts = CancellationTokenSource.CreateLinkedTokenSource(cloudCts.Token.LocalToken)
@@ -51,8 +51,8 @@ module Fold =
             return!
                 flow.WithEvaluators
                    (collectorf cts)
-                   (fun x -> local { return x })
-                   (fun values -> local {
+                   (fun x -> cloud0 { return x })
+                   (fun values -> cloud0 {
                        let! ctx = Cloud.GetExecutionContext()
                        let combined =
                             let mutable state = state ctx
@@ -74,7 +74,7 @@ module Fold =
                     (combiner : ExecutionContext -> 'State -> 'State -> 'State)
                     (state : ExecutionContext -> 'State) (flow : CloudFlow<'T>) : CloudFlow<'Key * 'State> =
 
-        let collectorf (cloudCts : ICloudCancellationTokenSource) (totalWorkers : int) = local {
+        let collectorf (cloudCts : ICloudCancellationTokenSource) (totalWorkers : int) = cloud0 {
             let dict = new ConcurrentDictionary<'Key, 'State ref>()
             let! ctx = Cloud.GetExecutionContext()
             let cts = CancellationTokenSource.CreateLinkedTokenSource(cloudCts.Token.LocalToken)
@@ -107,11 +107,11 @@ module Fold =
         // Phase 1
         let shuffling =
             cloud {
-                let combiner' (result : _ []) = local { return Array.concat result }
-                let! totalWorkers = match flow.DegreeOfParallelism with Some n -> local { return n } | None -> Cloud.GetWorkerCount()
+                let combiner' (result : _ []) = cloud0 { return Array.concat result }
+                let! totalWorkers = match flow.DegreeOfParallelism with Some n -> cloud0 { return n } | None -> Cloud.GetWorkerCount()
                 let! cts = Cloud.CreateCancellationTokenSource()
                 let! keyValueArray = flow.WithEvaluators (collectorf cts totalWorkers)
-                                                  (fun keyValues -> local {
+                                                  (fun keyValues -> cloud0 {
                                                         let dict = new Dictionary<int, PersistedCloudFlow<'Key * 'State>>()
                                                         for (key, value) in keyValues do
                                                             // partition in entities of 1GB
@@ -128,7 +128,7 @@ module Fold =
                     |> Stream.toArray
                 return merged
             }
-        let reducerf (cloudCts : ICloudCancellationTokenSource) = local {
+        let reducerf (cloudCts : ICloudCancellationTokenSource) = cloud0 {
             let dict = new ConcurrentDictionary<'Key, 'State ref>()
             let! ctx = Cloud.GetExecutionContext()
             let cts = CancellationTokenSource.CreateLinkedTokenSource(cloudCts.Token.LocalToken)
@@ -158,14 +158,14 @@ module Fold =
         // Phase 2
         let reducer (flow : CloudFlow<int * PersistedCloudFlow<'Key * 'State>>) : Cloud<PersistedCloudFlow<'Key * 'State>> =
             cloud {
-                let combiner' (result : PersistedCloudFlow<_> []) = local { return PersistedCloudFlow.Concat result }
+                let combiner' (result : PersistedCloudFlow<_> []) = cloud0 { return PersistedCloudFlow.Concat result }
                 let! cts = Cloud.CreateCancellationTokenSource()
                 let! keyValueArray = flow.WithEvaluators (reducerf cts) (fun keyValues -> PersistedCloudFlow.New(keyValues, storageLevel = StorageLevel.Disk)) combiner'
                 return keyValueArray
             }
         { new CloudFlow<'Key * 'State> with
             member self.DegreeOfParallelism = flow.DegreeOfParallelism
-            member self.WithEvaluators<'S, 'R> (collectorf : Local<Collector<'Key * 'State, 'S>>) (projection : 'S -> Local<'R>) combiner =
+            member self.WithEvaluators<'S, 'R> (collectorf : Cloud0<Collector<'Key * 'State, 'S>>) (projection : 'S -> Cloud0<'R>) combiner =
                 cloud {
                     let! result = shuffling
                     let! result' = reducer (Array.ToCloudFlow result)

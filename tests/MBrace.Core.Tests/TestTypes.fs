@@ -37,14 +37,14 @@ module CloudTree =
 module WordCount =
 
     let run size mapReduceAlgorithm : Cloud<int> =
-        let mapF (text : string) = local { return text.Split(' ').Length }
-        let reduceF i i' = local { return i + i' }
+        let mapF (text : string) = cloud0 { return text.Split(' ').Length }
+        let reduceF i i' = cloud0 { return i + i' }
         let inputs = Array.init size (fun i -> "lorem ipsum dolor sit amet")
         mapReduceAlgorithm mapF reduceF 0 inputs
 
     // naive, binary recursive mapreduce implementation
-    let rec mapReduceRec (mapF : 'T -> Local<'S>) 
-                            (reduceF : 'S -> 'S -> Local<'S>) 
+    let rec mapReduceRec (mapF : 'T -> Cloud0<'S>) 
+                            (reduceF : 'S -> 'S -> Cloud0<'S>) 
                             (id : 'S) (inputs : 'T []) =
         cloud {
             match inputs with

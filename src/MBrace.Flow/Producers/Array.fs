@@ -19,10 +19,10 @@ type internal Array =
     static member ToCloudFlow (source : 'T []) : CloudFlow<'T> =
         { new CloudFlow<'T> with
             member self.DegreeOfParallelism = None
-            member self.WithEvaluators<'S, 'R> (collectorf : Local<Collector<'T, 'S>>) (projection : 'S -> Local<'R>) (combiner : 'R [] -> Local<'R>) =
+            member self.WithEvaluators<'S, 'R> (collectorf : Cloud0<Collector<'T, 'S>>) (projection : 'S -> Cloud0<'R>) (combiner : 'R [] -> Cloud0<'R>) =
                 cloud {
                     // local worker ParStream workflow
-                    let createTask array = local {
+                    let createTask array = cloud0 {
                         let! collector = collectorf
                         let parStream = ParStream.ofArray array 
                         let collectorResult = parStream.Apply (collector.ToParStreamCollector())

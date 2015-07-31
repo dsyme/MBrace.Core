@@ -8,16 +8,16 @@ open MBrace.Core.Internals
 
 #nowarn "444"
 
-/// Intrinsic local workflow combinators
-type Local =
+/// Intrinsic single-machine cloud workflow combinators
+type Cloud0 =
         
     /// <summary>
     ///     Creates a cloud workflow that captures the current execution context.
     /// </summary>
     /// <param name="body">Execution body.</param>
     [<CompilerMessage("'FromContinuations' only intended for runtime implementers.", 444)>]
-    static member FromContinuations(body : ExecutionContext -> Continuation<'T> -> unit) : Local<'T> = 
-        mkLocal(fun ctx cont -> if ctx.IsCancellationRequested then cont.Cancel ctx else body ctx cont)
+    static member FromContinuations(body : ExecutionContext -> Continuation<'T> -> unit) : Cloud0<'T> = 
+        mkCloud0(fun ctx cont -> if ctx.IsCancellationRequested then cont.Cancel ctx else body ctx cont)
 
     /// <summary>
     ///     Runs provided workflow in a nested execution context that is
@@ -28,11 +28,11 @@ type Local =
     /// <param name="update">Resource updating function.</param>
     /// <param name="revert">Resource reverting function.</param>
     [<CompilerMessage("'WithNestedContext' only intended for runtime implementers.", 444)>]
-    static member WithNestedContext(workflow : Local<'T>, 
+    static member WithNestedContext(workflow : Cloud0<'T>, 
                                         update : ExecutionContext -> ExecutionContext, 
-                                        revert : ExecutionContext -> ExecutionContext) : Local<'T> =
+                                        revert : ExecutionContext -> ExecutionContext) : Cloud0<'T> =
 
-        Local.FromContinuations(withNestedContext update revert workflow.Body)
+        Cloud0.FromContinuations(withNestedContext update revert workflow.Body)
 
     /// <summary>
     ///     Runs provided workflow in a nested execution context that is
@@ -45,13 +45,13 @@ type Local =
     [<CompilerMessage("'WithNestedResource' only intended for runtime implementers.", 444)>]
     static member WithNestedResource(workflow : Cloud<'T>, 
                                         update : 'TResource -> 'TResource, 
-                                        revert : 'TResource -> 'TResource) : Local<'T> =
+                                        revert : 'TResource -> 'TResource) : Cloud0<'T> =
 
         let updateCtx f (ctx : ExecutionContext) =
             let tres = ctx.Resources.Resolve<'TResource> ()
             { ctx with Resources = ctx.Resources.Register(f tres) }
 
-        Local.FromContinuations(withNestedContext (updateCtx update) (updateCtx revert) workflow.Body) 
+        Cloud0.FromContinuations(withNestedContext (updateCtx update) (updateCtx revert) workflow.Body) 
 
     /// <summary>
     ///     Wraps a workflow with a mapped continuation.
@@ -59,8 +59,8 @@ type Local =
     /// <param name="mapper">Continuation mapping function.</param>
     /// <param name="workflow">Input workflow.</param>
     [<CompilerMessage("'GetResources' only intended for runtime implementers.", 444)>]
-    static member WithMappedContinuation (mapper : Continuation<'T> -> Continuation<'S>) (workflow : Local<'S>) : Local<'T> =
-        mkLocal (fun ctx cont -> workflow.Body ctx (mapper cont))
+    static member WithMappedContinuation (mapper : Continuation<'T> -> Continuation<'S>) (workflow : Cloud0<'S>) : Cloud0<'T> =
+        mkCloud0 (fun ctx cont -> workflow.Body ctx (mapper cont))
 
     /// <summary>
     ///     Appends a function information entry to the symbolic stacktrace in the exception continuation.
@@ -68,8 +68,8 @@ type Local =
     /// <param name="functionName">Function info string to be appended.</param>
     /// <param name="workflow">Workflow to be wrapped.</param>
     [<CompilerMessage("'GetResources' only intended for runtime implementers.", 444)>]
-    static member WithAppendedStackTrace (functionName : string) (workflow : Local<'T>) : Local<'T> =
-        mkLocal (fun ctx cont ->
+    static member WithAppendedStackTrace (functionName : string) (workflow : Cloud0<'T>) : Cloud0<'T> =
+        mkCloud0 (fun ctx cont ->
             let cont' = { cont with Exception = fun ctx edi -> cont.Exception ctx (appendToStacktrace functionName edi) }
             workflow.Body ctx cont')
 
@@ -143,22 +143,22 @@ type Cloud =
     ///     Returns the execution context of current computation.
     /// </summary>
     [<CompilerMessage("'GetExecutionContext' only intended for runtime implementers.", 444)>]
-    static member GetExecutionContext () : Local<ExecutionContext> =
-        Local.FromContinuations(fun ctx cont -> cont.Success ctx ctx)
+    static member GetExecutionContext () : Cloud0<ExecutionContext> =
+        Cloud0.FromContinuations(fun ctx cont -> cont.Success ctx ctx)
         
     /// <summary>
     ///     Returns the resource registry for current execution context.
     /// </summary>
     [<CompilerMessage("'GetResourceRegistry' only intended for runtime implementers.", 444)>]
-    static member GetResourceRegistry () : Local<ResourceRegistry> =
-        Local.FromContinuations(fun ctx cont -> cont.Success ctx ctx.Resources)
+    static member GetResourceRegistry () : Cloud0<ResourceRegistry> =
+        Cloud0.FromContinuations(fun ctx cont -> cont.Success ctx ctx.Resources)
 
     /// <summary>
     ///     Gets resource from current execution context.
     /// </summary>
     [<CompilerMessage("'GetResource' only intended for runtime implementers.", 444)>]
-    static member GetResource<'TResource> () : Local<'TResource> =
-        Local.FromContinuations(fun ctx cont ->
+    static member GetResource<'TResource> () : Cloud0<'TResource> =
+        Cloud0.FromContinuations(fun ctx cont ->
             let res = ValueOrException.protect (fun () -> ctx.Resources.Resolve<'TResource> ()) ()
             cont.ContinueWith(ctx, res))
 
@@ -166,8 +166,8 @@ type Cloud =
     ///     Try Getting resource from current execution context.
     /// </summary>
     [<CompilerMessage("'GetResources' only intended for runtime implementers.", 444)>]
-    static member TryGetResource<'TResource> () : Local<'TResource option> =
-        Local.FromContinuations(fun ctx cont -> cont.Success ctx <| ctx.Resources.TryResolve<'TResource> ())
+    static member TryGetResource<'TResource> () : Cloud0<'TResource option> =
+        Cloud0.FromContinuations(fun ctx cont -> cont.Success ctx <| ctx.Resources.TryResolve<'TResource> ())
 
     /// <summary>
     ///     Starts given workflow as a System.Threading.Task
@@ -198,8 +198,8 @@ type Cloud =
     /// <param name="task">Awaited task.</param>
     /// <param name="timeoutMilliseconds">Timeout in milliseconds. Defaults to infinite timeout.</param>
     [<CompilerMessage("'AwaitSystemTask' only intended for runtime implementers.", 444)>]
-    static member AwaitSystemTask(task : Task<'T>, ?timeoutMilliseconds : int) : Local<'T> =
-        Local.FromContinuations(fun ctx cont ->
+    static member AwaitSystemTask(task : Task<'T>, ?timeoutMilliseconds : int) : Cloud0<'T> =
+        Cloud0.FromContinuations(fun ctx cont ->
             let task = match timeoutMilliseconds with None -> task | Some ms -> task.WithTimeout ms
             let onCompletion (t : Task<'T>) =
                 match t.Status with
